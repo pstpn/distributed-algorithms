@@ -51,5 +51,16 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+# Cmake
+CMakeFiles/
+cmake-build-debug/
+
 # debug information files
 *.dwo
+
+# Local files
+.DS_Store
+.idea/
+
+# Data
+data/
