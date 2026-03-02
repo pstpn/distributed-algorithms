@@ -24,5 +24,5 @@ int main(const int argc, char **argv)
 
     free_perfect_table(ht);
 
-    return 0;
+    return EXIT_SUCCESS;
 }
