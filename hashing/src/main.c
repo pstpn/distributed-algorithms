@@ -10,7 +10,7 @@ int main(const int argc, char **argv)
         return ERR_EMPTY_INPUT;
 
     perfect_hash_table_t *ht;
-    int8_t rc = perfect_table_from_csv(argv[1], mad_hash1, &ht);
+    int8_t rc = perfect_table_from_csv(argv[1], hash_mad_a, &ht);
     if (rc != SUCCESS)
         return rc;
 

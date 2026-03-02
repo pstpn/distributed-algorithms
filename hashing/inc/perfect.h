@@ -36,13 +36,14 @@ typedef struct ceil_value
 typedef struct perfect_hash_table
 {
     size_t size;
+    size_t not_null_cells;
     hash_func_t hash;
     ceil_value_t **cells;
 } perfect_hash_table_t;
 
-perfect_hash_table_t *create_perfect_table(hash_func_t, size_t);
+int8_t create_perfect_table(hash_func_t, size_t, perfect_hash_table_t **);
 int8_t perfect_table_from_csv(const char *, hash_func_t, perfect_hash_table_t **);
-int8_t perfect_set(const perfect_hash_table_t *, const char *, double);
+int8_t perfect_set(perfect_hash_table_t *, const char *, double);
 int8_t perfect_get(const perfect_hash_table_t *, const char *, double *);
 void free_perfect_table(perfect_hash_table_t *);
 
