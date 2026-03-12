@@ -45,3 +45,7 @@ test: test_build
 
 clean:
 	-rm -f a.out perfect_test bench.out && rm -rf a.out.dSYM perfect_test.dSYM bench.out.dSYM
+
+.PHONY: report
+report:
+	cd report && /usr/local/bin/pdflatex -synctex=1 -interaction=nonstopmode "report".tex >/dev/null

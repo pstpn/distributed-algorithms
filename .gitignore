@@ -64,3 +64,16 @@ cmake-build-debug/
 
 # Data
 data/
+
+# Tex
+*.aux
+*.bbl
+*.log
+*.bcf
+*.blg
+*.xml
+*.gz
+*.toc
+*.zip
+*.out
+*.sqlite
