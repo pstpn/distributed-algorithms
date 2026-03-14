@@ -30,10 +30,10 @@ plot \
 	bench_csv using (strcol(1) eq "delete" ? $2 : 1/0):5 with linespoints linewidth 2 title "delete", \
 	bench_csv using (strcol(1) eq "get" ? $2 : 1/0):5 with linespoints linewidth 2 title "get"
 
-set output plot_dir . "/profile_alloc_size_total.pdf"
-set title "total allocated size"
+set output plot_dir . "/profile_alloc_size_delta.pdf"
+set title "allocated size delta"
 set xlabel "Dataset size"
-set ylabel "allocated bytes"
+set ylabel "allocated bytes delta"
 plot \
 	profile_csv using (strcol(1) eq "insert" ? $2 : 1/0):7 with linespoints linewidth 2 title "insert", \
 	profile_csv using (strcol(1) eq "update" ? $2 : 1/0):7 with linespoints linewidth 2 title "update", \
