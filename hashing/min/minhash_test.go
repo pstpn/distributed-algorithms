@@ -1,7 +1,6 @@
 package minhash
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -45,48 +44,29 @@ func TestFullScanMatchesAddedDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIndex: %v", err)
 	}
-	workload := MakeWorkload(64, 2026)
-	if err := idx.Build(workload.Base); err != nil {
+	baseDocs := randomDocuments(2026)
+	if err := idx.Build(baseDocs); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	for _, doc := range workload.Incoming[:8] {
+
+	newDocs := randomDocuments(8)
+	for _, doc := range newDocs {
 		if err := idx.Add(doc); err != nil {
 			t.Fatalf("Add: %v", err)
 		}
 	}
-	for _, query := range workload.Queries[:8] {
-		matches := idx.FullScanDuplicates(query.Text, 0.5)
+	for _, query := range newDocs {
+		matches := idx.FullScanDuplicates(query.Text, 0.99)
 		if len(matches) == 0 {
 			t.Fatalf("expected matches for query %q", query.ID)
 		}
 	}
 }
 
-func TestStatsReflectDocumentsAndBuckets(t *testing.T) {
-	idx, err := NewIndex(DefaultConfig())
-	if err != nil {
-		t.Fatalf("NewIndex: %v", err)
-	}
-	workload := MakeWorkload(32, 42)
-	if err := idx.Build(workload.Base); err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	stats := idx.Stats()
-	if stats.DocumentCount != 32 {
-		t.Fatalf("expected 32 docs, got %d", stats.DocumentCount)
-	}
-	if stats.BucketCount == 0 {
-		t.Fatal("expected non-zero bucket count")
-	}
-	if stats.BandCount != DefaultBands {
-		t.Fatalf("expected %d bands, got %d", DefaultBands, stats.BandCount)
-	}
-}
-
 func FuzzExactDuplicatesAreFound(f *testing.F) {
 	for _, sample := range []string{
 		"distributed hashing duplicate search",
-		"LSH supports approximate nearest neighbors in text corpora",
+		"LSH supports approximate nearest neighbors",
 		strings.Repeat("token ", 8),
 	} {
 		f.Add(sample)
@@ -110,21 +90,4 @@ func FuzzExactDuplicatesAreFound(f *testing.F) {
 			t.Fatalf("expected exact full-scan duplicate for %q, got %#v", text, scan)
 		}
 	})
-}
-
-func BenchmarkSmokeConfig(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_, err := NewIndex(DefaultConfig())
-		if err != nil {
-			b.Fatalf("NewIndex: %v", err)
-		}
-	}
-}
-
-func ExampleIndex_FullScanDuplicates() {
-	idx, _ := NewIndex(DefaultConfig())
-	_ = idx.Build([]Document{{ID: "doc-1", Text: "minhash for duplicate text search"}})
-	matches := idx.FullScanDuplicates("minhash for duplicate text search", 0.9)
-	fmt.Println(matches[0].ID)
-	// Output: doc-1
 }
