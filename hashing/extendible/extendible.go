@@ -173,6 +173,56 @@ func (t *Table) Sync() error {
 	return t.file.Sync()
 }
 
+func (t *Table) Clear() error {
+	nextID := t.nextBucketID()
+	for bucketID := uint32(0); bucketID < nextID; bucketID++ {
+		t.setBucketCount(bucketID, 0)
+		t.setBucketLocalDepth(bucketID, 0)
+	}
+	for i := uint32(0); i < t.maxDirectoryEntries(); i++ {
+		t.setDirectory(i, 0)
+	}
+	t.setUint32(headerGlobalDepthOffset, 0)
+	t.setUint32(headerNextBucketIDOffset, 1)
+	return nil
+}
+
+func (t *Table) PreallocateBuckets(target int) error {
+	for current := 0; current < target; current++ {
+		if _, err := t.allocateBucket(0); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (t *Table) ResidentBucketPages() (residentPages int, totalPages int, err error) {
+	region := t.bucketRegionInUse()
+	if len(region) == 0 {
+		return 0, 0, nil
+	}
+
+	pageSize := os.Getpagesize()
+	totalPages = (len(region) + pageSize - 1) / pageSize
+	vec := make([]byte, totalPages)
+	_, _, errno := syscall.Syscall(syscall.SYS_MINCORE,
+		uintptr(unsafe.Pointer(&region[0])),
+		uintptr(len(region)),
+		uintptr(unsafe.Pointer(&vec[0])),
+	)
+	if errno != 0 {
+		return 0, totalPages, errno
+	}
+
+	for _, state := range vec {
+		if state&1 != 0 {
+			residentPages++
+		}
+	}
+	return residentPages, totalPages, nil
+}
+
 func (t *Table) Insert(key uint64, value uint64) error {
 	hash := t.hashFunc(key)
 	for {
@@ -568,6 +618,27 @@ func (t *Table) uint64At(offset int) uint64 {
 
 func (t *Table) setUint64(offset int, value uint64) {
 	*(*uint64)(unsafe.Pointer(&t.mmap[offset])) = value
+}
+
+func (t *Table) bucketRegionInUse() []byte {
+	start := int(t.bucketBase)
+	end := int(t.bucketOffset(t.nextBucketID()))
+	if start < 0 {
+		start = 0
+	}
+	if end < start {
+		return nil
+	}
+	if start > len(t.mmap) {
+		return nil
+	}
+	if end > len(t.mmap) {
+		end = len(t.mmap)
+	}
+	if end == start {
+		return nil
+	}
+	return t.mmap[start:end]
 }
 
 func depthMask(depth uint) uint64 {

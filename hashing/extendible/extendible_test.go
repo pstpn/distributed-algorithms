@@ -75,7 +75,7 @@ func TestTableRandomOperations(t *testing.T) {
 
 func TestTableSplitAndMerge(t *testing.T) {
 	table := newTestTable(t, 2)
-	keys := makeDataset(512, 11)
+	keys := makeDataset(512)
 
 	for index, key := range keys {
 		if err := table.Insert(key, uint64(index)); err != nil {
@@ -116,7 +116,7 @@ func TestTablePersistenceAcrossReopen(t *testing.T) {
 		t.Fatalf("NewTable: %v", err)
 	}
 
-	keys := makeDataset(2000, 33)
+	keys := makeDataset(2000)
 	for index, key := range keys {
 		if err := table.Insert(key, uint64(index+1)); err != nil {
 			t.Fatalf("insert key=%d: %v", key, err)
@@ -241,12 +241,10 @@ func assertMatchesMirror(t testing.TB, table *Table, mirror map[uint64]uint64) {
 	}
 }
 
-func makeDataset(size int, seed int64) []uint64 {
-	state := uint64(seed) + 0x9e3779b97f4a7c15
+func makeDataset(size int) []uint64 {
 	keys := make([]uint64, size)
 	for index := range keys {
-		state += 0x9e3779b97f4a7c15
-		keys[index] = Uint64Hasher(state ^ uint64(index))
+		keys[index] = rand.Uint64()
 	}
 	return keys
 }
