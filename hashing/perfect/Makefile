@@ -1,6 +1,7 @@
 CC := gcc
 CFLAGS := -I inc/ -O2 -Wall -Wextra -Werror
 BENCH_OUT := data/bench_results_$(shell date +%Y%m%d_%H%M%S).csv
+LATEST_BENCH_CSV := $(shell ls -1t data/bench_results_*.csv 2>/dev/null | head -n 1)
 BENCH_CFLAGS := -I inc/ -O3 -ffast-math -DNDEBUG -march=native -mtune=native -flto
 
 CHECK_CFLAGS := $(shell pkg-config --cflags check 2>/dev/null)
@@ -27,10 +28,10 @@ bench_build:
 	$(CC) $(BENCH_CFLAGS) src/benchmark.c src/perfect.c src/hash.c src/primes.c -o bench.out
 
 bench: bench_build
-	./bench.out $(FILES) > $(BENCH_OUT)
+	./bench.out > $(BENCH_OUT)
 
-bench_plot:
-	gnuplot -e "input='$(CSV)';outdir='data'" scripts/plot_bench.gnuplot
+plot:
+	gnuplot -e "input='$(LATEST_BENCH_CSV)';outdir='data'" scripts/plot_bench.gnuplot
 
 leaks:
 	-leaks -atExit -- ./a.out data/train_data_version1_10.csv

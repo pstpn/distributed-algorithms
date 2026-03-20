@@ -43,7 +43,6 @@ typedef struct perfect_hash_table
 
 int8_t create_perfect_table(hash_func_t, size_t, perfect_hash_table_t **);
 int8_t perfect_table_from_csv(const char *, hash_func_t, perfect_hash_table_t **);
-int8_t perfect_set(perfect_hash_table_t *, const char *, double);
 int8_t perfect_get(const perfect_hash_table_t *, const char *, double *);
 void free_perfect_table(perfect_hash_table_t *);
 

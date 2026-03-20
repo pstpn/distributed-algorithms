@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,7 +8,8 @@
 #include "hash.h"
 #include "perfect.h"
 
-#define DEFAULT_BENCH_ITERS 5
+#define DEFAULT_BENCH_ITERS 100
+#define DEFAULT_COUNT_PER_ITER 100000
 
 
 typedef struct
@@ -22,6 +24,28 @@ static double now_sec(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static double ci95_seconds(const double *values, int count)
+{
+    if (values == NULL || count <= 1)
+        return 0.0;
+
+    double mean = 0.0;
+    for (int i = 0; i < count; ++i)
+        mean += values[i];
+    mean /= (double)count;
+
+    double variance = 0.0;
+    for (int i = 0; i < count; ++i)
+    {
+        const double d = values[i] - mean;
+        variance += d * d;
+    }
+    variance /= (double)(count - 1);
+
+    const double stderr = sqrt(variance / (double)count);
+    return 1.96 * stderr;
 }
 
 static void free_dataset(dataset_t *ds)
@@ -56,7 +80,7 @@ static int8_t parse_line(char *line, char **out_text, double *out_value)
         return ERR_PARSE;
 
     char *comma = strrchr(line, ',');
-    if (comma == NULL || comma == line || comma[1] == '\0')
+    if (!comma || comma[1] == '\0')
         return ERR_PARSE;
 
     *comma = '\0';
@@ -116,17 +140,24 @@ static int8_t load_dataset(const char *path, dataset_t *out)
         {
             arr_cap *= 2;
             char **new_keys = realloc(out->keys, sizeof(char *) * arr_cap);
-            double *new_vals = realloc(out->values, sizeof(double) * arr_cap);
-            if (new_keys == NULL || new_vals == NULL)
+            if (!new_keys)
             {
-                free(new_keys);
-                free(new_vals);
                 free(line);
                 fclose(f);
                 free_dataset(out);
                 return ERR_ALLOC;
             }
+
             out->keys = new_keys;
+
+            double *new_vals = realloc(out->values, sizeof(double) * arr_cap);
+            if (new_vals == NULL)
+            {
+                free(line);
+                fclose(f);
+                free_dataset(out);
+                return ERR_ALLOC;
+            }
             out->values = new_vals;
         }
 
@@ -170,87 +201,77 @@ static int benchmark_one(const char *path)
             iters = parsed;
     }
 
-    double insert_sec_sum = 0.0;
     double get_sec_sum = 0.0;
-    double ins_thr_sum = 0.0;
     double get_thr_sum = 0.0;
+    double *get_avg_samples = malloc(sizeof(double) * (size_t)iters);
+    if (!get_avg_samples)
+    {
+        free(get_avg_samples);
+        free_dataset(&ds);
+        fprintf(stderr, "alloc failed for benchmark buffers\n");
+        return 1;
+    }
+
+    perfect_hash_table_t *ht = NULL;
+    rc = perfect_table_from_csv(path, hash_mad_a, &ht);
+    if (rc != SUCCESS)
+    {
+        free(get_avg_samples);
+        free_dataset(&ds);
+        fprintf(stderr, "create static table failed for %s rc=%d\n", path, rc);
+        return 1;
+    }
 
     for (int iter = 0; iter < iters; ++iter)
     {
-        perfect_hash_table_t *ht = NULL;
-        rc = create_perfect_table(hash_mad_a, ds.size, &ht);
-        if (rc != SUCCESS)
+        const double t1 = now_sec();
+        for (size_t i = 0; i < DEFAULT_COUNT_PER_ITER; ++i)
         {
-            free_dataset(&ds);
-            fprintf(stderr, "create table failed for %s rc=%d\n", path, rc);
-            return 1;
-        }
-
-        double t0 = now_sec();
-        for (size_t i = 0; i < ds.size; ++i)
-        {
-            rc = perfect_set(ht, ds.keys[i], ds.values[i]);
-            if (rc != SUCCESS)
-            {
-                fprintf(stderr, "insert failed for %s at %zu rc=%d\n", path, i, rc);
-                free_perfect_table(ht);
-                free_dataset(&ds);
-                return 1;
-            }
-        }
-        double t1 = now_sec();
-
-        for (size_t i = 0; i < ds.size; ++i)
-        {
+            const size_t idx = i % ds.size;
             double out = 0.0;
-            rc = perfect_get(ht, ds.keys[i], &out);
-            if (rc != SUCCESS || fabs(out - ds.values[i]) > 1e-9)
+            rc = perfect_get(ht, ds.keys[idx], &out);
+            if (rc != SUCCESS || fabs(out - ds.values[idx]) > 1e-9)
             {
-                fprintf(stderr, "get failed for %s at %zu rc=%d\n", path, i, rc);
+                fprintf(stderr, "get failed for %s at %zu rc=%d\n", path, idx, rc);
                 free_perfect_table(ht);
+                free(get_avg_samples);
                 free_dataset(&ds);
                 return 1;
             }
         }
-        double t2 = now_sec();
+        const double t2 = now_sec();
 
-        const double insert_sec = t1 - t0;
         const double get_sec = t2 - t1;
-        const double ins_thr = insert_sec > 0 ? (double)ds.size / insert_sec : 0.0;
-        const double get_thr = get_sec > 0 ? (double)ds.size / get_sec : 0.0;
+        const double get_thr = get_sec > 0 ? (double)DEFAULT_COUNT_PER_ITER / get_sec : 0.0;
 
-        insert_sec_sum += insert_sec;
         get_sec_sum += get_sec;
-        ins_thr_sum += ins_thr;
         get_thr_sum += get_thr;
-
-        free_perfect_table(ht);
+        get_avg_samples[iter] = get_sec / (double)DEFAULT_COUNT_PER_ITER;
     }
 
-    double insert_sec = insert_sec_sum / (double)iters;
-    double get_sec = get_sec_sum / (double)iters;
-    double insert_avg_sec = ds.size > 0 ? insert_sec / (double)ds.size : 0.0;
-    double get_avg_sec = ds.size > 0 ? get_sec / (double)ds.size : 0.0;
-    double ins_thr = ins_thr_sum / (double)iters;
-    double get_thr = get_thr_sum / (double)iters;
+    const double get_sec = get_sec_sum / (double)iters;
+    const double get_avg_sec =  get_sec / (double)DEFAULT_COUNT_PER_ITER;
+    const double get_ci95_avg_sec = ci95_seconds(get_avg_samples, iters);
+    const double get_thr = get_thr_sum / (double)iters;
 
-    printf("%s,%zu,%.9f,%.12f,%.2f,%.9f,%.12f,%.2f\n",
+    printf("%s,%zu,%d,%.9f,%.12f,%.12f,%.2f\n",
         path,
         ds.size,
-        insert_sec,
-        insert_avg_sec,
-        ins_thr,
+        iters,
         get_sec,
         get_avg_sec,
+        get_ci95_avg_sec,
         get_thr);
 
+    free_perfect_table(ht);
+    free(get_avg_samples);
     free_dataset(&ds);
     return 0;
 }
 
 int main(int argc, char **argv)
 {
-    printf("file,rows,insert_sec,insert_avg_sec,insert_ops_sec,get_sec,get_avg_sec,get_ops_sec\n");
+    printf("file,rows,iterations,get_sec,get_avg_sec,get_ci95_avg_sec,get_ops_sec\n");
 
     if (argc > 1)
     {

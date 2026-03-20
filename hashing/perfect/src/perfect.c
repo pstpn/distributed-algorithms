@@ -1,10 +1,10 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
+#include "hash.h"
 #include "perfect.h"
 #include "primes.h"
-#include "hash.h"
 
 
 static const hash_func_t HASH_FUNCS[] = {
@@ -19,6 +19,7 @@ static const hash_func_t HASH_FUNCS[] = {
 };
 
 static void free_cells(ceil_value_t **, size_t);
+static int8_t build_table(perfect_hash_table_t *, const char **, const double *, size_t);
 
 int8_t create_perfect_table(const hash_func_t hash, const size_t size, perfect_hash_table_t **ht)
 {
@@ -39,19 +40,30 @@ int8_t create_perfect_table(const hash_func_t hash, const size_t size, perfect_h
     return SUCCESS;
 }
 
+static void free_entries(char **keys, double *values, const size_t count)
+{
+    if (keys)
+        for (size_t i = 0; i < count; ++i)
+            free(keys[i]);
+
+    free(keys);
+    free(values);
+}
+
 static int8_t parse_line(char *line, char **out_text, double *out_value)
 {
-    if (!line)
+    if (!line || !out_text || !out_value)
         return ERR_PARSE;
 
     size_t len = strlen(line);
     while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
         line[--len] = '\0';
+
     if (line[0] == '\0')
         return ERR_PARSE;
 
     char *comma = strrchr(line, ',');
-    if (!comma || comma == line || comma[1] == '\0')
+    if (!comma || comma[1] == '\0')
         return ERR_PARSE;
 
     *comma = '\0';
@@ -64,7 +76,6 @@ static int8_t parse_line(char *line, char **out_text, double *out_value)
 
     *out_text = line;
     *out_value = value;
-
     return SUCCESS;
 }
 
@@ -88,83 +99,97 @@ int8_t perfect_table_from_csv(const char *csv_path, const hash_func_t hash, perf
     }
 
     size_t keys_count = 0;
+    size_t keys_cap = 1024;
+    char **keys = malloc(sizeof(char *) * keys_cap);
+    double *values = malloc(sizeof(double) * keys_cap);
+    if (!keys || !values)
+    {
+        free(line);
+        fclose(file);
+        free(keys);
+        free(values);
+        return ERR_ALLOC;
+    }
+
     while (getline(&line, &cap, file) >= 0)
     {
-        char *text;
-        double value;
+        char *text = NULL;
+        double value = 0.0;
 
         const int8_t rc = parse_line(line, &text, &value);
         if (rc != SUCCESS)
         {
+            free_entries(keys, values, keys_count);
             free(line);
             fclose(file);
             return rc;
         }
 
+        if (keys_count == keys_cap)
+        {
+            const size_t new_cap = keys_cap * 2;
+            char **new_keys = realloc(keys, sizeof(char *) * new_cap);
+            if (!new_keys)
+            {
+                free_entries(keys, values, keys_count);
+                free(line);
+                fclose(file);
+                return ERR_ALLOC;
+            }
+            keys = new_keys;
+
+            double *new_values = realloc(values, sizeof(double) * new_cap);
+            if (!new_values)
+            {
+                free_entries(keys, values, keys_count);
+                free(line);
+                fclose(file);
+                return ERR_ALLOC;
+            }
+            values = new_values;
+            keys_cap = new_cap;
+        }
+
+        keys[keys_count] = strdup(text);
+        if (!keys[keys_count])
+        {
+            free_entries(keys, values, keys_count);
+            free(line);
+            fclose(file);
+            return ERR_ALLOC;
+        }
+
+        values[keys_count] = value;
         ++keys_count;
     }
-    const int8_t rc = create_perfect_table(hash, keys_count, ht);
+
+    int8_t rc = create_perfect_table(hash, keys_count, ht);
     if (rc != SUCCESS)
     {
+        free_entries(keys, values, keys_count);
         free(line);
         fclose(file);
         return rc;
     }
 
-    fseek(file, 0, SEEK_SET);
-    if (getline(&line, &cap, file) < 0)
+    rc = build_table(*ht, (const char **)keys, values, keys_count);
+    if (rc != SUCCESS)
     {
-        free(line);
-        fclose(file);
-        return ERR_PARSE;
+        free_perfect_table(*ht);
+        *ht = NULL;
     }
 
-    while (getline(&line, &cap, file) >= 0)
-    {
-        char *text;
-        double value;
-
-        int8_t rc = parse_line(line, &text, &value);
-        if (rc != SUCCESS)
-        {
-            free(line);
-            fclose(file);
-            return rc;
-        }
-
-        rc = perfect_set(*ht, text, value);
-        if (rc != SUCCESS)
-        {
-            free(line);
-            fclose(file);
-            return rc;
-        }
-    }
-
+    free_entries(keys, values, keys_count);
     free(line);
     fclose(file);
 
-    return SUCCESS;
+    return rc;
 }
 
-static void collect_secondary_table(const perfect_hash_table_t *secondary, char ***keys, double **values)
-{
-    for (size_t i = 0, pos = 0; i < secondary->size; ++i)
-    {
-        const ceil_value_t *cell = secondary->cells[i];
-        if (!cell)
-            continue;
-
-        (*keys)[pos] = cell->data.pair.key;
-        (*values)[pos] = cell->data.pair.value;
-        ++pos;
-    }
-}
-
-static int8_t build_candidate_secondary(
+static int8_t build_candidate_table(
     const hash_func_t hash,
     const size_t size,
-    char **keys,
+    const char **keys,
     const double *values,
     const size_t count,
     ceil_value_t ***out_cells
@@ -199,7 +224,6 @@ static int8_t build_candidate_secondary(
             return ERR_ALLOC;
         }
         cell->data.pair.value = values[i];
-
         cells[idx] = cell;
     }
 
@@ -207,157 +231,54 @@ static int8_t build_candidate_secondary(
     return SUCCESS;
 }
 
-static int8_t insert_secondary_table(perfect_hash_table_t *secondary, const char *key, const double value)
+static int8_t build_table(
+    perfect_hash_table_t *ht,
+    const char **keys,
+    const double *values,
+    const size_t count
+)
 {
-    const unsigned long long new_hash = secondary->hash(key, secondary->size);
-    const ceil_value_t *ceil_to_insert = secondary->cells[new_hash];
+    if (!ht || (!keys && count > 0) || (!values && count > 0) || ht->not_null_cells != 0)
+        return ERR_EMPTY_INPUT;
 
-    if (!ceil_to_insert)
-    {
-        ceil_value_t *ceil = malloc(sizeof(ceil_value_t));
-        if (!ceil)
-            return ERR_ALLOC;
-
-        ceil->is_hash_table = false;
-        ceil->data.pair.key = strdup(key);
-        if (!ceil->data.pair.key)
-        {
-            free(ceil);
-            return ERR_ALLOC;
-        }
-        ceil->data.pair.value = value;
-
-        secondary->cells[new_hash] = ceil;
-        ++secondary->not_null_cells;
+    if (count == 0)
         return SUCCESS;
-    }
-    if (strcmp(ceil_to_insert->data.pair.key, key) == 0)
-    {
-        secondary->cells[new_hash]->data.pair.value = value;
-        return SUCCESS;
-    }
 
-    const size_t new_count = secondary->not_null_cells + 1;
-    char **keys = malloc(sizeof(char *) * new_count);
-    double *values = malloc(sizeof(double) * new_count);
-    if (!keys || !values)
-    {
-        free(keys);
-        free(values);
-        return ERR_ALLOC;
-    }
-
-    collect_secondary_table(secondary, &keys, &values);
-    keys[new_count - 1] = (char *)key;
-    values[new_count - 1] = value;
-
-    for (size_t candidate_size = secondary->size; ; candidate_size = find_next_prime(candidate_size * 2 + 1))
+    for (size_t candidate_size = ht->size; ; candidate_size = find_next_prime(candidate_size * 2 + 1))
     {
         for (size_t i = 0; i < sizeof(HASH_FUNCS) / sizeof(HASH_FUNCS[0]); ++i)
         {
             ceil_value_t **candidate = NULL;
-            const int8_t rc = build_candidate_secondary(HASH_FUNCS[i], candidate_size,
-                                           keys, values, new_count,
-                                           &candidate);
+            const int8_t rc = build_candidate_table(HASH_FUNCS[i], candidate_size, keys, values, count, &candidate);
             if (rc == SUCCESS)
             {
-                free_cells(secondary->cells, secondary->size);
-                secondary->cells = candidate;
-                secondary->hash = HASH_FUNCS[i];
-                secondary->size = candidate_size;
-                secondary->not_null_cells = new_count;
-
-                free(keys);
-                free(values);
+                free(ht->cells);
+                ht->cells = candidate;
+                ht->size = candidate_size;
+                ht->hash = HASH_FUNCS[i];
+                ht->not_null_cells = count;
                 return SUCCESS;
             }
 
             if (rc == ERR_ALLOC)
-            {
-                free(keys);
-                free(values);
                 return ERR_ALLOC;
-            }
         }
     }
-}
-
-int8_t perfect_set(perfect_hash_table_t *ht, const char *key, const double value)
-{
-    const unsigned long long h = ht->hash(key, ht->size);
-    ceil_value_t *current_ceil = ht->cells[h];
-
-    if (!current_ceil)
-    {
-        ceil_value_t *ceil = malloc(sizeof(ceil_value_t));
-        if (!ceil)
-            return ERR_ALLOC;
-
-        ceil->is_hash_table = false;
-        ceil->data.pair.key = strdup(key);
-        if (!ceil->data.pair.key)
-        {
-            free(ceil);
-            return ERR_ALLOC;
-        }
-        ceil->data.pair.value = value;
-
-        ht->cells[h] = ceil;
-        ++ht->not_null_cells;
-    }
-    else if (!current_ceil->is_hash_table)
-    {
-        if (strcmp(current_ceil->data.pair.key, key) == 0)
-        {
-            current_ceil->data.pair.value = value;
-            return SUCCESS;
-        }
-
-        perfect_hash_table_t *child_table;
-        int8_t rc = create_perfect_table(hash_mad_a, 2, &child_table);
-        if (rc != SUCCESS)
-            return rc;
-
-        rc = insert_secondary_table(child_table, current_ceil->data.pair.key, current_ceil->data.pair.value);
-        if (rc != SUCCESS)
-        {
-            free_perfect_table(child_table);
-            return rc;
-        }
-
-        rc = insert_secondary_table(child_table, key, value);
-        if (rc != SUCCESS)
-        {
-            free_perfect_table(child_table);
-            return rc;
-        }
-
-        free(current_ceil->data.pair.key);
-        current_ceil->is_hash_table = true;
-        current_ceil->data.hash_table = child_table;
-    }
-    else
-        return insert_secondary_table(current_ceil->data.hash_table, key, value);
-
-    return SUCCESS;
 }
 
 int8_t perfect_get(const perfect_hash_table_t *ht, const char *key, double *value)
 {
-    if (!value)
+    if (!ht || !key || !value)
         return ERR_EMPTY_INPUT;
 
     const unsigned long long h = ht->hash(key, ht->size);
-    const ceil_value_t *ceil = ht->cells[h];
-
-    if (!ceil)
+    const ceil_value_t *cell = ht->cells[h];
+    if (!cell)
         return ERR_NOT_FOUND;
 
-    if (ceil->is_hash_table)
-        return perfect_get(ceil->data.hash_table, key, value);
-    if (strcmp(ceil->data.pair.key, key) == 0)
+    if (strcmp(cell->data.pair.key, key) == 0)
     {
-        *value = ceil->data.pair.value;
+        *value = cell->data.pair.value;
         return SUCCESS;
     }
 
@@ -370,15 +291,17 @@ static void free_cells(ceil_value_t **cells, const size_t size)
         return;
 
     for (size_t i = 0; i < size; ++i)
-        if (cells[i])
-        {
-            if (cells[i]->is_hash_table)
-                free_perfect_table(cells[i]->data.hash_table);
-            else
-                free(cells[i]->data.pair.key);
+    {
+        if (!cells[i])
+            continue;
 
-            free(cells[i]);
-        }
+        if (cells[i]->is_hash_table)
+            free_perfect_table(cells[i]->data.hash_table);
+        else
+            free(cells[i]->data.pair.key);
+
+        free(cells[i]);
+    }
 
     free(cells);
 }
