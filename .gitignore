@@ -43,7 +43,6 @@
 *.pdb
 
 # Kernel Module Compile Results
-*.mod*
 *.cmd
 .tmp_versions/
 modules.order
@@ -51,5 +50,30 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+# Cmake
+CMakeFiles/
+cmake-build-debug/
+
 # debug information files
 *.dwo
+
+# Local files
+.DS_Store
+.idea/
+
+# Data
+data/
+metrics/
+
+# Tex
+*.aux
+*.bbl
+*.log
+*.bcf
+*.blg
+*.xml
+*.gz
+*.toc
+*.zip
+*.out
+*.sqlite
