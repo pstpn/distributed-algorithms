@@ -1,5 +1,6 @@
 CC := gcc
-CFLAGS := -I inc/ -O2 -Wall -Wextra -Werror
+CFLAGS := -I inc/ -Wall -Wextra -Werror
+PROFILE_CFLAGS := -pg -O3
 BENCH_OUT := data/bench_results_$(shell date +%Y%m%d_%H%M%S).csv
 LATEST_BENCH_CSV := $(shell ls -1t data/bench_results_*.csv 2>/dev/null | head -n 1)
 BENCH_CFLAGS := -I inc/ -O3 -ffast-math -DNDEBUG -march=native -mtune=native -flto
@@ -43,8 +44,18 @@ test: test_build
 
 .PHONY: clean
 clean:
-	-rm -f a.out kdtree_test bench.out && rm -rf a.out.dSYM kdtree_test.dSYM bench.out.dSYM
+	-rm -f a.out kdtree_test kdtree_profile bench.out && rm -rf a.out.dSYM kdtree_test.dSYM bench.out.dSYM out.folded out.stacks
 
 .PHONY: report
 report:
 	cd report && /usr/local/bin/pdflatex -synctex=1 -interaction=nonstopmode "report".tex >/dev/null
+
+.PHONY: profile_build
+profile_build:
+	$(CC) $(CFLAGS) $(PROFILE_CFLAGS) src/kdtree.c src/main.c -o kdtree_profile
+
+.PHONY: profile
+profile: profile_build
+	sudo dtrace -x ustackframes=100 -n 'profile-997 /execname == "kdtree_profile"/ { @[ustack()] = count(); }' -c ./kdtree_profile -o out.stacks
+	./FlameGraph/stackcollapse.pl out.stacks > out.folded
+	./FlameGraph/flamegraph.pl out.folded > flamegraph.svg

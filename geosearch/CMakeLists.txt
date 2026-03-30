@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.31)
-project(hashing C)
+project(geosearch C)
 
 set(CMAKE_C_STANDARD 11)
 
-include_directories(inc)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/inc)
 
 add_executable(geosearch
-        inc/kdtree.h
         src/kdtree.c
+        src/main.c
 )
