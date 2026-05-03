@@ -60,6 +60,7 @@ cmake-build-debug/
 # Local files
 .DS_Store
 .idea/
+FlameGraph/
 
 # Data
 data/
