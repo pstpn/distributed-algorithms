@@ -16,14 +16,14 @@ type Pair struct {
 	Value string
 }
 
-type entry struct {
+type node struct {
 	key   string
-	value string
+	value atomic.Pointer[string]
+	next  atomic.Pointer[node]
 }
 
 type bucket struct {
-	mu      sync.RWMutex
-	entries []entry
+	head atomic.Pointer[node]
 }
 
 type table struct {
@@ -32,8 +32,8 @@ type table struct {
 
 type Map struct {
 	resizeMu      sync.RWMutex
-	table         atomic.Value
-	size          int64
+	tbl           atomic.Pointer[table]
+	size          atomic.Int64
 	maxLoadFactor float64
 }
 
@@ -46,22 +46,23 @@ func NewMapWithBuckets(bucketCount int) *Map {
 		bucketCount = defaultBuckets
 	}
 	m := &Map{maxLoadFactor: defaultMaxLoad}
-	m.table.Store(&table{buckets: make([]bucket, bucketCount)})
+	m.tbl.Store(&table{buckets: make([]bucket, bucketCount)})
 	return m
 }
 
 func (m *Map) Size() int {
-	return int(atomic.LoadInt64(&m.size))
+	return int(m.size.Load())
 }
 
 func (m *Map) Get(key string) (string, bool) {
-	tbl := m.table.Load().(*table)
+	tbl := m.tbl.Load()
 	b := &tbl.buckets[hashIndex(key, len(tbl.buckets))]
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	for _, e := range b.entries {
-		if e.key == key {
-			return e.value, true
+	for n := b.head.Load(); n != nil; n = n.next.Load() {
+		if n.key == key {
+			if v := n.value.Load(); v != nil {
+				return *v, true
+			}
+			return "", false
 		}
 	}
 	return "", false
@@ -69,74 +70,86 @@ func (m *Map) Get(key string) (string, bool) {
 
 func (m *Map) Put(key string, value string) {
 	m.resizeMu.RLock()
-	tbl := m.table.Load().(*table)
+	tbl := m.tbl.Load()
 	b := &tbl.buckets[hashIndex(key, len(tbl.buckets))]
-	b.mu.Lock()
-	updated := false
-	for i := range b.entries {
-		if b.entries[i].key == key {
-			b.entries[i].value = value
-			updated = true
-			break
+	for {
+		for n := b.head.Load(); n != nil; n = n.next.Load() {
+			if n.key == key {
+				for {
+					oldVal := n.value.Load()
+					if n.value.CompareAndSwap(oldVal, &value) {
+						m.resizeMu.RUnlock()
+						m.maybeResize()
+						return
+					}
+				}
+			}
+		}
+		newNode := &node{key: key}
+		newNode.value.Store(&value)
+		head := b.head.Load()
+		newNode.next.Store(head)
+		if b.head.CompareAndSwap(head, newNode) {
+			m.size.Add(1)
+			m.resizeMu.RUnlock()
+			m.maybeResize()
+			return
 		}
 	}
-	if !updated {
-		b.entries = append(b.entries, entry{key: key, value: value})
-		atomic.AddInt64(&m.size, 1)
-	}
-	b.mu.Unlock()
-	m.resizeMu.RUnlock()
-	m.maybeResize()
 }
 
 func (m *Map) Merge(key string, value string, merger func(string, string) string) string {
 	m.resizeMu.RLock()
-	tbl := m.table.Load().(*table)
+	tbl := m.tbl.Load()
 	b := &tbl.buckets[hashIndex(key, len(tbl.buckets))]
-	b.mu.Lock()
-	var out string
-	updated := false
-	for i := range b.entries {
-		if b.entries[i].key == key {
-			if merger != nil {
-				out = merger(b.entries[i].value, value)
-			} else {
-				out = value
+	for {
+		for n := b.head.Load(); n != nil; n = n.next.Load() {
+			if n.key == key {
+				for {
+					oldVal := n.value.Load()
+					if oldVal == nil {
+						break
+					}
+					merged := merger(*oldVal, value)
+					if n.value.CompareAndSwap(oldVal, &merged) {
+						m.resizeMu.RUnlock()
+						m.maybeResize()
+						return merged
+					}
+				}
+				break
 			}
-			b.entries[i].value = out
-			updated = true
-			break
+		}
+		newNode := &node{key: key}
+		newNode.value.Store(&value)
+		head := b.head.Load()
+		newNode.next.Store(head)
+		if b.head.CompareAndSwap(head, newNode) {
+			m.size.Add(1)
+			m.resizeMu.RUnlock()
+			m.maybeResize()
+			return value
 		}
 	}
-	if !updated {
-		out = value
-		b.entries = append(b.entries, entry{key: key, value: out})
-		atomic.AddInt64(&m.size, 1)
-	}
-	b.mu.Unlock()
-	m.resizeMu.RUnlock()
-	m.maybeResize()
-	return out
 }
 
 func (m *Map) Clear() {
 	m.resizeMu.Lock()
-	old := m.table.Load().(*table)
-	m.table.Store(&table{buckets: make([]bucket, len(old.buckets))})
-	atomic.StoreInt64(&m.size, 0)
+	old := m.tbl.Load()
+	m.tbl.Store(&table{buckets: make([]bucket, len(old.buckets))})
+	m.size.Store(0)
 	m.resizeMu.Unlock()
 }
 
 func (m *Map) Iterator() <-chan Pair {
-	tbl := m.table.Load().(*table)
+	tbl := m.tbl.Load()
 	pairs := make([]Pair, 0)
 	for i := range tbl.buckets {
-		b := &tbl.buckets[i]
-		b.mu.RLock()
-		for _, e := range b.entries {
-			pairs = append(pairs, Pair{Key: e.key, Value: e.value})
+		for n := tbl.buckets[i].head.Load(); n != nil; n = n.next.Load() {
+			if v := n.value.Load(); v != nil {
+				pairs = append(pairs, Pair{Key: n.key, Value: *v})
+			}
 		}
-		b.mu.RUnlock()
 	}
 	ch := make(chan Pair, len(pairs))
 	for _, p := range pairs {
@@ -147,14 +160,14 @@ func (m *Map) Iterator() <-chan Pair {
 }
 
 func (m *Map) maybeResize() {
-	tbl := m.table.Load().(*table)
-	if float64(atomic.LoadInt64(&m.size)) <= float64(len(tbl.buckets))*m.maxLoadFactor {
+	tbl := m.tbl.Load()
+	if float64(m.size.Load()) <= float64(len(tbl.buckets))*m.maxLoadFactor {
 		return
 	}
 	m.resizeMu.Lock()
 	defer m.resizeMu.Unlock()
-	tbl = m.table.Load().(*table)
-	if float64(atomic.LoadInt64(&m.size)) <= float64(len(tbl.buckets))*m.maxLoadFactor {
+	tbl = m.tbl.Load()
+	if float64(m.size.Load()) <= float64(len(tbl.buckets))*m.maxLoadFactor {
 		return
 	}
 	newSize := len(tbl.buckets) * 2
@@ -163,15 +176,18 @@ func (m *Map) maybeResize() {
 	}
 	newTable := &table{buckets: make([]bucket, newSize)}
 	for i := range tbl.buckets {
-		b := &tbl.buckets[i]
-		b.mu.RLock()
-		for _, e := range b.entries {
-			idx := hashIndex(e.key, len(newTable.buckets))
-			newTable.buckets[idx].entries = append(newTable.buckets[idx].entries, e)
+		for n := tbl.buckets[i].head.Load(); n != nil; n = n.next.Load() {
+			if v := n.value.Load(); v != nil {
+				idx := hashIndex(n.key, len(newTable.buckets))
+				nn := &node{key: n.key}
+				nn.value.Store(v)
+				head := newTable.buckets[idx].head.Load()
+				nn.next.Store(head)
+				newTable.buckets[idx].head.Store(nn)
+			}
 		}
-		b.mu.RUnlock()
 	}
-	m.table.Store(newTable)
+	m.tbl.Store(newTable)
 }
 
 func hashIndex(key string, bucketCount int) int {
