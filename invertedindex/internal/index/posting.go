@@ -90,6 +90,10 @@ func (pl *PostingList) iterator() *PostingIterator {
 	}
 }
 
+func (pl *PostingList) NewIterator() *PostingIterator {
+	return pl.iterator()
+}
+
 type PostingIterator struct {
 	pl           *PostingList
 	pos          int
@@ -150,6 +154,16 @@ func (it *PostingIterator) skipTo(targetDocID uint32) bool {
 	}
 
 	return false
+}
+
+func (it *PostingIterator) AdvanceTo(docID uint32) uint32 {
+	if !it.skipTo(docID) {
+		return 0
+	}
+	if it.currentDocID() != docID {
+		return 0
+	}
+	return uint32(len(it.currentPosting().Positions))
 }
 
 func (it *PostingIterator) reset() {
@@ -256,28 +270,46 @@ func Difference(pl1, pl2 *PostingList) *PostingList {
 }
 
 func Adjacent(pl1, pl2 *PostingList) *PostingList {
-	intersected := Intersect(pl1, pl2)
+	it1 := pl1.iterator()
+	it2 := pl2.iterator()
 
 	var result []Posting
-	for _, p := range intersected.Postings() {
-		positions1 := pl1.FindPositions(p.DocID)
-		positions2 := pl2.FindPositions(p.DocID)
 
-		var adjPositions []uint32
-		for _, pos1 := range positions1 {
-			for _, pos2 := range positions2 {
-				if pos2 == pos1+1 {
-					adjPositions = append(adjPositions, pos1, pos2)
+	for it1.hasNext() && it2.hasNext() {
+		p1 := it1.next()
+		p2 := it2.next()
+
+		for {
+			if p1.DocID == p2.DocID {
+				var adjPositions []uint32
+				for _, pos1 := range p1.Positions {
+					for _, pos2 := range p2.Positions {
+						if pos2 == pos1+1 {
+							adjPositions = append(adjPositions, pos1, pos2)
+							break
+						}
+					}
+				}
+
+				if len(adjPositions) > 0 {
+					result = append(result, Posting{
+						DocID:     p1.DocID,
+						Positions: adjPositions,
+					})
+				}
+				break
+			}
+			if p1.DocID < p2.DocID {
+				if !it1.skipTo(p2.DocID) {
 					break
 				}
+				p1 = it1.currentPosting()
+			} else {
+				if !it2.skipTo(p1.DocID) {
+					break
+				}
+				p2 = it2.currentPosting()
 			}
-		}
-
-		if len(adjPositions) > 0 {
-			result = append(result, Posting{
-				DocID:     p.DocID,
-				Positions: adjPositions,
-			})
 		}
 	}
 
@@ -286,44 +318,73 @@ func Adjacent(pl1, pl2 *PostingList) *PostingList {
 }
 
 func Near(pl1, pl2 *PostingList, distance int) *PostingList {
-	intersected := Intersect(pl1, pl2)
+	it1 := pl1.iterator()
+	it2 := pl2.iterator()
 
 	var result []Posting
-	for _, p := range intersected.Postings() {
-		positions1 := pl1.FindPositions(p.DocID)
-		positions2 := pl2.FindPositions(p.DocID)
 
-		var nearPositions []uint32
-		i, j := 0, 0
-		for i < len(positions1) && j < len(positions2) {
-			diff := int(positions1[i]) - int(positions2[j])
-			absDiff := diff
-			if absDiff < 0 {
-				absDiff = -absDiff
+	for it1.hasNext() && it2.hasNext() {
+		p1 := it1.next()
+		p2 := it2.next()
+
+		for {
+			if p1.DocID == p2.DocID {
+				var nearPositions []uint32
+				i, j := 0, 0
+				for i < len(p1.Positions) && j < len(p2.Positions) {
+					diff := int(p1.Positions[i]) - int(p2.Positions[j])
+					absDiff := diff
+					if absDiff < 0 {
+						absDiff = -absDiff
+					}
+
+					if absDiff <= distance {
+						nearPositions = sortedInsertUnique(nearPositions, p1.Positions[i])
+						nearPositions = sortedInsertUnique(nearPositions, p2.Positions[j])
+					}
+
+					if p1.Positions[i] < p2.Positions[j] {
+						i++
+					} else {
+						j++
+					}
+				}
+
+				if len(nearPositions) > 0 {
+					result = append(result, Posting{
+						DocID:     p1.DocID,
+						Positions: nearPositions,
+					})
+				}
+				break
 			}
-
-			if absDiff <= distance {
-				nearPositions = sortedInsertUnique(nearPositions, positions1[i])
-				nearPositions = sortedInsertUnique(nearPositions, positions2[j])
-			}
-
-			if positions1[i] < positions2[j] {
-				i++
+			if p1.DocID < p2.DocID {
+				if !it1.skipTo(p2.DocID) {
+					break
+				}
+				p1 = it1.currentPosting()
 			} else {
-				j++
+				if !it2.skipTo(p1.DocID) {
+					break
+				}
+				p2 = it2.currentPosting()
 			}
-		}
-
-		if len(nearPositions) > 0 {
-			result = append(result, Posting{
-				DocID:     p.DocID,
-				Positions: nearPositions,
-			})
 		}
 	}
 
 	df := uint32(len(result))
 	return NewPostingList(result, df)
+}
+
+func (pl *PostingList) FindPositions(docID uint32) []uint32 {
+	it := pl.iterator()
+	if !it.skipTo(docID) {
+		return nil
+	}
+	if it.currentDocID() != docID {
+		return nil
+	}
+	return it.currentPosting().Positions
 }
 
 func sortedInsertUnique(sorted []uint32, val uint32) []uint32 {
@@ -335,22 +396,6 @@ func sortedInsertUnique(sorted []uint32, val uint32) []uint32 {
 	copy(sorted[i+1:], sorted[i:])
 	sorted[i] = val
 	return sorted
-}
-
-func (pl *PostingList) FindPositions(docID uint32) []uint32 {
-	lo, hi := 0, len(pl.postings)-1
-	for lo <= hi {
-		mid := (lo + hi) / 2
-		if pl.postings[mid].DocID == docID {
-			return pl.postings[mid].Positions
-		}
-		if pl.postings[mid].DocID < docID {
-			lo = mid + 1
-		} else {
-			hi = mid - 1
-		}
-	}
-	return nil
 }
 
 func mergePositions(p1, p2 []uint32) []uint32 {

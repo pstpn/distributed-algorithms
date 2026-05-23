@@ -55,32 +55,31 @@ func (r *Ranker) scoreDocument(termFreq uint32, docLength uint32, docFreq uint32
 	return idf * normalizedTF
 }
 
-func (r *Ranker) scoreQueryFromPostings(docID uint32, docLength uint32, termPostings map[string]*index.PostingList) float64 {
-	var score float64
-
-	for _, pl := range termPostings {
-		positions := pl.FindPositions(docID)
-		termFreq := uint32(len(positions))
-		if termFreq == 0 {
-			continue
-		}
-		docFreq := pl.DF()
-		score += r.scoreDocument(termFreq, docLength, docFreq)
-	}
-
-	return score
-}
-
 func (r *Ranker) RankResults(pl *index.PostingList, termPostings map[string]*index.PostingList) []ScoredDoc {
 	if pl == nil || pl.Len() == 0 {
 		return nil
+	}
+
+	iterators := make(map[string]*index.PostingIterator, len(termPostings))
+	for term, tpl := range termPostings {
+		iterators[term] = tpl.NewIterator()
 	}
 
 	results := make([]ScoredDoc, 0, pl.Len())
 	for i := 0; i < pl.Len(); i++ {
 		p := pl.Posting(i)
 		docLength := r.idx.GetDocLength(p.DocID)
-		score := r.scoreQueryFromPostings(p.DocID, docLength, termPostings)
+
+		var score float64
+		for term, it := range iterators {
+			tf := it.AdvanceTo(p.DocID)
+			if tf == 0 {
+				continue
+			}
+			docFreq := termPostings[term].DF()
+			score += r.scoreDocument(tf, docLength, docFreq)
+		}
+
 		results = append(results, ScoredDoc{
 			DocID: p.DocID,
 			Score: score,
