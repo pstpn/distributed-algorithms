@@ -3,7 +3,6 @@ package storage
 import (
 	"fmt"
 	"os"
-	"sync"
 
 	"golang.org/x/exp/mmap"
 )
@@ -12,7 +11,6 @@ type MMapStorage struct {
 	file   *os.File
 	reader *mmap.ReaderAt
 	size   int64
-	mu     sync.RWMutex
 }
 
 func OpenMMap(filename string) (*MMapStorage, error) {

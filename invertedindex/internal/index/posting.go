@@ -178,7 +178,6 @@ func Intersect(pl1, pl2 *PostingList) *PostingList {
 	it2 := pl2.iterator()
 
 	var result []Posting
-
 	for it1.hasNext() && it2.hasNext() {
 		p1 := it1.next()
 		p2 := it2.next()
@@ -210,9 +209,9 @@ func Intersect(pl1, pl2 *PostingList) *PostingList {
 }
 
 func Union(pl1, pl2 *PostingList) *PostingList {
-	var result []Posting
 	i, j := 0, 0
 
+	var result []Posting
 	for i < pl1.Len() && j < pl2.Len() {
 		p1 := pl1.Posting(i)
 		p2 := pl2.Posting(j)
@@ -249,7 +248,6 @@ func Difference(pl1, pl2 *PostingList) *PostingList {
 	it2 := pl2.iterator()
 
 	var result []Posting
-
 	for it1.hasNext() {
 		p1 := it1.next()
 
@@ -274,7 +272,6 @@ func Adjacent(pl1, pl2 *PostingList) *PostingList {
 	it2 := pl2.iterator()
 
 	var result []Posting
-
 	for it1.hasNext() && it2.hasNext() {
 		p1 := it1.next()
 		p2 := it2.next()
@@ -322,7 +319,6 @@ func Near(pl1, pl2 *PostingList, distance int) *PostingList {
 	it2 := pl2.iterator()
 
 	var result []Posting
-
 	for it1.hasNext() && it2.hasNext() {
 		p1 := it1.next()
 		p2 := it2.next()
