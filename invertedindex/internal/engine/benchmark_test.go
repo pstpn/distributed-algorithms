@@ -247,11 +247,11 @@ var searchQueries = []struct {
 	query string
 }{
 	{"Term", "the"},
-	{"And", "the AND to"},
-	{"Or", "the OR to"},
-	{"Not", "the NOT to"},
+	{"And", "the AND fox"},
+	{"Or", "the OR fox"},
+	{"Not", "the NOT fox"},
 	{"Adj", "to ADJ the"},
-	{"Near", "the NEAR/3 to"},
+	{"Near", "to NEAR/3 the"},
 	{"Complex_AndOr", "(the OR to) AND but"},
 	{"Complex_AdjAnd", "to ADJ the AND but"},
 	{"Complex_AndNot", "(the AND to) NOT but"},

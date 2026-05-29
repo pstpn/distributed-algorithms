@@ -174,33 +174,25 @@ func (it *PostingIterator) reset() {
 }
 
 func Intersect(pl1, pl2 *PostingList) *PostingList {
-	it1 := pl1.iterator()
-	it2 := pl2.iterator()
+	short, long := pl1, pl2
+	if short.Len() > long.Len() {
+		short, long = pl2, pl1
+	}
+
+	itShort := short.iterator()
+	itLong := long.iterator()
 
 	var result []Posting
-	for it1.hasNext() && it2.hasNext() {
-		p1 := it1.next()
-		p2 := it2.next()
-
-		for {
-			if p1.DocID == p2.DocID {
-				result = append(result, Posting{
-					DocID:     p1.DocID,
-					Positions: mergePositions(p1.Positions, p2.Positions),
-				})
-				break
-			}
-			if p1.DocID < p2.DocID {
-				if !it1.skipTo(p2.DocID) {
-					break
-				}
-				p1 = it1.currentPosting()
-			} else {
-				if !it2.skipTo(p1.DocID) {
-					break
-				}
-				p2 = it2.currentPosting()
-			}
+	for itShort.hasNext() {
+		pShort := itShort.next()
+		if !itLong.skipTo(pShort.DocID) {
+			break
+		}
+		if itLong.currentDocID() == pShort.DocID {
+			result = append(result, Posting{
+				DocID:     pShort.DocID,
+				Positions: mergePositions(pShort.Positions, itLong.currentPosting().Positions),
+			})
 		}
 	}
 
@@ -255,7 +247,6 @@ func Difference(pl1, pl2 *PostingList) *PostingList {
 			result = append(result, p1)
 			continue
 		}
-
 		if it2.currentDocID() == p1.DocID {
 			continue
 		}
@@ -268,45 +259,55 @@ func Difference(pl1, pl2 *PostingList) *PostingList {
 }
 
 func Adjacent(pl1, pl2 *PostingList) *PostingList {
-	it1 := pl1.iterator()
-	it2 := pl2.iterator()
+	short, long := pl1, pl2
+	shortIsLeft := true
+	if short.Len() > long.Len() {
+		short, long = pl2, pl1
+		shortIsLeft = false
+	}
+
+	itShort := short.iterator()
+	itLong := long.iterator()
 
 	var result []Posting
-	for it1.hasNext() && it2.hasNext() {
-		p1 := it1.next()
-		p2 := it2.next()
+	for itShort.hasNext() {
+		pShort := itShort.next()
+		if !itLong.skipTo(pShort.DocID) {
+			break
+		}
+		if itLong.currentDocID() != pShort.DocID {
+			continue
+		}
+		pLong := itLong.currentPosting()
 
-		for {
-			if p1.DocID == p2.DocID {
-				var adjPositions []uint32
-				for _, pos1 := range p1.Positions {
-					for _, pos2 := range p2.Positions {
-						if pos2 == pos1+1 {
-							adjPositions = append(adjPositions, pos1, pos2)
-							break
-						}
-					}
-				}
+		var pLeft, pRight Posting
+		if shortIsLeft {
+			pLeft, pRight = pShort, pLong
+		} else {
+			pLeft, pRight = pLong, pShort
+		}
 
-				if len(adjPositions) > 0 {
-					result = append(result, Posting{
-						DocID:     p1.DocID,
-						Positions: adjPositions,
-					})
-				}
-				break
-			}
-			if p1.DocID < p2.DocID {
-				if !it1.skipTo(p2.DocID) {
-					break
-				}
-				p1 = it1.currentPosting()
+		var adjPositions []uint32
+		i, j := 0, 0
+		for i < len(pLeft.Positions) && j < len(pRight.Positions) {
+			posLeft := pLeft.Positions[i]
+			posRight := pRight.Positions[j]
+			if posLeft+1 == posRight {
+				adjPositions = append(adjPositions, posLeft, posRight)
+				i++
+				j++
+			} else if posLeft+1 < posRight {
+				i++
 			} else {
-				if !it2.skipTo(p1.DocID) {
-					break
-				}
-				p2 = it2.currentPosting()
+				j++
 			}
+		}
+
+		if len(adjPositions) > 0 {
+			result = append(result, Posting{
+				DocID:     pShort.DocID,
+				Positions: adjPositions,
+			})
 		}
 	}
 
@@ -315,56 +316,51 @@ func Adjacent(pl1, pl2 *PostingList) *PostingList {
 }
 
 func Near(pl1, pl2 *PostingList, distance int) *PostingList {
-	it1 := pl1.iterator()
-	it2 := pl2.iterator()
+	short, long := pl1, pl2
+	if short.Len() > long.Len() {
+		short, long = pl2, pl1
+	}
+
+	itShort := short.iterator()
+	itLong := long.iterator()
 
 	var result []Posting
-	for it1.hasNext() && it2.hasNext() {
-		p1 := it1.next()
-		p2 := it2.next()
+	for itShort.hasNext() {
+		pShort := itShort.next()
+		if !itLong.skipTo(pShort.DocID) {
+			break
+		}
+		if itLong.currentDocID() != pShort.DocID {
+			continue
+		}
+		pLong := itLong.currentPosting()
 
-		for {
-			if p1.DocID == p2.DocID {
-				var nearPositions []uint32
-				i, j := 0, 0
-				for i < len(p1.Positions) && j < len(p2.Positions) {
-					diff := int(p1.Positions[i]) - int(p2.Positions[j])
-					absDiff := diff
-					if absDiff < 0 {
-						absDiff = -absDiff
-					}
-
-					if absDiff <= distance {
-						nearPositions = sortedInsertUnique(nearPositions, p1.Positions[i])
-						nearPositions = sortedInsertUnique(nearPositions, p2.Positions[j])
-					}
-
-					if p1.Positions[i] < p2.Positions[j] {
-						i++
-					} else {
-						j++
-					}
-				}
-
-				if len(nearPositions) > 0 {
-					result = append(result, Posting{
-						DocID:     p1.DocID,
-						Positions: nearPositions,
-					})
-				}
-				break
+		var nearPositions []uint32
+		i, j := 0, 0
+		for i < len(pShort.Positions) && j < len(pLong.Positions) {
+			diff := int(pShort.Positions[i]) - int(pLong.Positions[j])
+			absDiff := diff
+			if absDiff < 0 {
+				absDiff = -absDiff
 			}
-			if p1.DocID < p2.DocID {
-				if !it1.skipTo(p2.DocID) {
-					break
-				}
-				p1 = it1.currentPosting()
+
+			if absDiff <= distance {
+				nearPositions = sortedInsertUnique(nearPositions, pShort.Positions[i])
+				nearPositions = sortedInsertUnique(nearPositions, pLong.Positions[j])
+			}
+
+			if pShort.Positions[i] < pLong.Positions[j] {
+				i++
 			} else {
-				if !it2.skipTo(p1.DocID) {
-					break
-				}
-				p2 = it2.currentPosting()
+				j++
 			}
+		}
+
+		if len(nearPositions) > 0 {
+			result = append(result, Posting{
+				DocID:     pShort.DocID,
+				Positions: nearPositions,
+			})
 		}
 	}
 
