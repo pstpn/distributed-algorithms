@@ -1,7 +1,5 @@
 package query
 
-import "fmt"
-
 type nodeType int
 
 const (
@@ -60,25 +58,6 @@ func newNearNode(left, right *Node, distance int) *Node {
 		Type:     nodeNear,
 		Distance: distance,
 		Children: []*Node{left, right},
-	}
-}
-
-func (n *Node) String() string {
-	switch n.Type {
-	case nodeTerm:
-		return n.Term
-	case nodeAnd:
-		return "(" + n.Children[0].String() + " AND " + n.Children[1].String() + ")"
-	case nodeOr:
-		return "(" + n.Children[0].String() + " OR " + n.Children[1].String() + ")"
-	case nodeNot:
-		return "(" + n.Children[0].String() + " NOT " + n.Children[1].String() + ")"
-	case nodeAdj:
-		return "(" + n.Children[0].String() + " ADJ " + n.Children[1].String() + ")"
-	case nodeNear:
-		return "(" + n.Children[0].String() + " NEAR/" + fmt.Sprintf("%d", n.Distance) + " " + n.Children[1].String() + ")"
-	default:
-		return "<unknown>"
 	}
 }
 
