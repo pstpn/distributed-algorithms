@@ -4,39 +4,62 @@ import (
 	"testing"
 )
 
-func TestDeltaEncodePostings(t *testing.T) {
-	entries := []PostingEntry{
-		{DocID: 1, Positions: []uint32{0, 5, 10}},
-		{DocID: 3, Positions: []uint32{2, 7}},
-		{DocID: 10, Positions: []uint32{1}},
+func TestCompressUint32(t *testing.T) {
+	arr := []uint32{1, 3, 10, 25, 100, 255}
+	encoded := Compress(arr)
+	decoded := Decompress(encoded)
+
+	if len(decoded) != len(arr) {
+		t.Fatalf("length mismatch: got %d, want %d", len(decoded), len(arr))
 	}
-
-	encoded := DeltaEncodePostings(entries)
-	decoded := DeltaDecodePostings(encoded)
-
-	if len(decoded) != len(entries) {
-		t.Fatalf("length mismatch: got %d, want %d", len(decoded), len(entries))
-	}
-
-	for i, entry := range entries {
-		if decoded[i].DocID != entry.DocID {
-			t.Errorf("docID at index %d: got %d, want %d", i, decoded[i].DocID, entry.DocID)
-		}
-		if len(decoded[i].Positions) != len(entry.Positions) {
-			t.Fatalf("positions length at index %d: got %d, want %d", i, len(decoded[i].Positions), len(entry.Positions))
-		}
-		for j, pos := range entry.Positions {
-			if decoded[i].Positions[j] != pos {
-				t.Errorf("position at index %d/%d: got %d, want %d", i, j, decoded[i].Positions[j], pos)
-			}
+	for i, v := range arr {
+		if decoded[i] != v {
+			t.Errorf("at index %d: got %d, want %d", i, decoded[i], v)
 		}
 	}
 }
 
-func TestDeltaEncodePostingsEmpty(t *testing.T) {
-	entries := []PostingEntry{}
-	encoded := DeltaEncodePostings(entries)
-	if encoded != nil {
-		t.Errorf("expected nil for empty postings, got %v", encoded)
+func TestCompressUint32Empty(t *testing.T) {
+	arr := []uint32{}
+	encoded := Compress(arr)
+	decoded := Decompress(encoded)
+	if len(decoded) != 0 {
+		t.Errorf("expected empty, got %d elements", len(decoded))
+	}
+}
+
+func TestCompressedSize(t *testing.T) {
+	arr := []uint32{1, 3, 10, 25}
+	encoded := Compress(arr)
+	size := CompressedSize(encoded)
+	if size != len(encoded) {
+		t.Errorf("CompressedSize = %d, want %d", size, len(encoded))
+	}
+}
+
+func TestCompressedSizeEmpty(t *testing.T) {
+	arr := []uint32{}
+	encoded := Compress(arr)
+	size := CompressedSize(encoded)
+	if size != len(encoded) {
+		t.Errorf("CompressedSize = %d, want %d", size, len(encoded))
+	}
+}
+
+func TestCompressLargeArray(t *testing.T) {
+	arr := make([]uint32, 1000)
+	for i := 0; i < 1000; i++ {
+		arr[i] = uint32(i % 50)
+	}
+	encoded := Compress(arr)
+	decoded := Decompress(encoded)
+
+	if len(decoded) != len(arr) {
+		t.Fatalf("length mismatch: got %d, want %d", len(decoded), len(arr))
+	}
+	for i, v := range arr {
+		if decoded[i] != v {
+			t.Errorf("at index %d: got %d, want %d", i, decoded[i], v)
+		}
 	}
 }

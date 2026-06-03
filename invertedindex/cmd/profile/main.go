@@ -40,7 +40,7 @@ func main() {
 
 	switch *mode {
 	case "build":
-		profileBuild(*size)
+		profileBuild(*size, *rounds)
 	case "search":
 		profileSearch(*query, *rounds)
 	default:
@@ -49,35 +49,37 @@ func main() {
 	}
 }
 
-func profileBuild(size int) {
-	tmpDir, err := os.MkdirTemp("", "iidx-profile-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "temp dir: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.RemoveAll(tmpDir)
+func profileBuild(size int, rounds int) {
+	for r := 0; r < rounds; r++ {
+		tmpDir, err := os.MkdirTemp("", "iidx-profile-*")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "temp dir: %v\n", err)
+			os.Exit(1)
+		}
 
-	b := index.NewIndexBuilder()
-	for i := 0; i < size; i++ {
-		title := "Document " + strconv.Itoa(i)
-		text := generateText(i)
-		b.AddDocument(title, text)
-	}
+		b := index.NewIndexBuilder()
+		for i := 0; i < size; i++ {
+			title := "Document " + strconv.Itoa(i)
+			text := generateText(i)
+			b.AddDocument(title, text)
+		}
 
-	idxPath := tmpDir + "/profile.idx"
-	if err := b.Save(idxPath); err != nil {
-		fmt.Fprintf(os.Stderr, "save: %v\n", err)
-		os.Exit(1)
-	}
+		idxPath := tmpDir + "/profile.idx"
+		if err := b.Save(idxPath); err != nil {
+			fmt.Fprintf(os.Stderr, "save: %v\n", err)
+			os.Exit(1)
+		}
 
-	eng, err := engine.LoadEngine(idxPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "load: %v\n", err)
-		os.Exit(1)
-	}
-	eng.Close()
+		eng, err := engine.LoadEngine(idxPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "load: %v\n", err)
+			os.Exit(1)
+		}
+		eng.Close()
+		os.RemoveAll(tmpDir)
 
-	fmt.Printf("build profile: %d documents indexed\n", size)
+		fmt.Printf("round %d: %d documents indexed\n", r+1, size)
+	}
 }
 
 func profileSearch(queryStr string, rounds int) {

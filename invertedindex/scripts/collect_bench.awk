@@ -13,6 +13,13 @@ BEGIN { OFS=","; print "operation,size,value,ci95" }
 		op = "build"
 	} else if (bench_type == "Warmup") {
 		op = "warmup"
+	} else if (bench_type == "SearchRank") {
+		if (length(parts) >= 3) {
+			split(parts[3], sub_parts, "-")
+			op = "searchrank_" sub_parts[1]
+		} else {
+			op = "searchrank"
+		}
 	} else if (bench_type == "Search") {
 		if (length(parts) >= 3) {
 			split(parts[3], sub_parts, "-")
@@ -37,7 +44,7 @@ BEGIN { OFS=","; print "operation,size,value,ci95" }
 		value = ("ns/op" in m) ? m["ns/op"] : 0
 		ci = ("ci95_ns/warmup" in m) ? m["ci95_ns/warmup"] : 0
 	} else {
-		value = ("ns/op" in m) ? m["ns/op"] : 0
+		value = ("avg_ns/query" in m) ? m["avg_ns/query"] : 0
 		ci = ("ci95_ns/query" in m) ? m["ci95_ns/query"] : 0
 	}
 

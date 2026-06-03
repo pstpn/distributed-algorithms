@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/montanaflynn/stats"
 	"github.com/pstpn/iidx/internal/index"
+	"github.com/pstpn/iidx/internal/storage"
 )
 
 var (
@@ -141,6 +143,45 @@ func ci95(values []float64) float64 {
 	return 1.96 * sd / math.Sqrt(float64(n))
 }
 
+func loadIndexTerms(indexFile string) []string {
+	s, err := storage.OpenMMap(indexFile)
+	if err != nil {
+		return nil
+	}
+	defer s.Close()
+
+	header, err := storage.ReadHeader(s)
+	if err != nil {
+		return nil
+	}
+
+	termEntries, err := storage.ReadTermEntries(s, header)
+	if err != nil {
+		return nil
+	}
+
+	keywords := map[string]bool{"AND": true, "OR": true, "NOT": true, "ADJ": true, "NEAR": true}
+
+	filtered := make([]storage.TermEntry, 0, len(termEntries))
+	for _, entry := range termEntries {
+		if keywords[strings.ToUpper(entry.Term)] {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].DocFreq < filtered[j].DocFreq
+	})
+
+	cutoff := len(filtered) / 2
+	terms := make([]string, cutoff)
+	for i := 0; i < cutoff; i++ {
+		terms[i] = filtered[i].Term
+	}
+	return terms
+}
+
 func buildIndex(b testing.TB, docs []wikiDoc, indexFile string) {
 	b.Helper()
 
@@ -186,10 +227,8 @@ func BenchmarkBuild(b *testing.B) {
 			b.ReportMetric(ci95(nsOpSamples), "ci95_ns/op")
 
 			idxInfo, _ := os.Stat(indexFile)
-			dsInfo, _ := os.Stat(docStoreFile)
-			if idxInfo != nil && dsInfo != nil {
-				totalBytes := float64(idxInfo.Size() + dsInfo.Size())
-				b.ReportMetric(totalBytes, "bytes/index")
+			if idxInfo != nil {
+				b.ReportMetric(float64(idxInfo.Size()), "bytes/index")
 			}
 		})
 	}
@@ -242,63 +281,145 @@ func BenchmarkWarmup(b *testing.B) {
 	}
 }
 
-var searchQueries = []struct {
-	name  string
-	query string
-}{
-	{"Term", "the"},
-	{"And", "the AND fox"},
-	{"Or", "the OR fox"},
-	{"Not", "the NOT fox"},
-	{"Adj", "to ADJ the"},
-	{"Near", "to NEAR/3 the"},
-	{"Complex_AndOr", "(the OR to) AND but"},
-	{"Complex_AdjAnd", "to ADJ the AND but"},
-	{"Complex_AndNot", "(the AND to) NOT but"},
+type searchQueryType struct {
+	name string
+	gen  func(rng *rand.Rand, terms []string) string
+}
+
+func makeSearchQueryTypes() []searchQueryType {
+	return []searchQueryType{
+		{"Or", func(rng *rand.Rand, terms []string) string {
+			return terms[rng.Intn(len(terms))] + " OR " + terms[rng.Intn(len(terms))]
+		}},
+		{"And", func(rng *rand.Rand, terms []string) string {
+			return terms[rng.Intn(len(terms))] + " AND " + terms[rng.Intn(len(terms))]
+		}},
+		{"Term", func(rng *rand.Rand, terms []string) string {
+			return terms[rng.Intn(len(terms))]
+		}},
+		{"Not", func(rng *rand.Rand, terms []string) string {
+			return terms[rng.Intn(len(terms))] + " AND NOT " + terms[rng.Intn(len(terms))]
+		}},
+		{"Adj", func(rng *rand.Rand, terms []string) string {
+			return terms[rng.Intn(len(terms))] + " ADJ " + terms[rng.Intn(len(terms))]
+		}},
+		{"Near", func(rng *rand.Rand, terms []string) string {
+			return terms[rng.Intn(len(terms))] + " NEAR/3 " + terms[rng.Intn(len(terms))]
+		}},
+		{"Complex_AndOr", func(rng *rand.Rand, terms []string) string {
+			return "(" + terms[rng.Intn(len(terms))] + " OR " + terms[rng.Intn(len(terms))] + ") AND " + terms[rng.Intn(len(terms))]
+		}},
+		{"Complex_AdjAnd", func(rng *rand.Rand, terms []string) string {
+			return terms[rng.Intn(len(terms))] + " ADJ " + terms[rng.Intn(len(terms))] + " AND " + terms[rng.Intn(len(terms))]
+		}},
+		{"Complex_AndNot", func(rng *rand.Rand, terms []string) string {
+			return "(" + terms[rng.Intn(len(terms))] + " AND " + terms[rng.Intn(len(terms))] + ") AND NOT " + terms[rng.Intn(len(terms))]
+		}},
+	}
+}
+
+const searchQueriesPerType = 10000
+
+func benchmarkSearchEngine(b *testing.B, size int) (*Engine, []string) {
+	b.Helper()
+
+	allDocs := loadAllDocuments(b)
+	if len(allDocs) < size {
+		b.Skipf("not enough documents: got %d, need %d", len(allDocs), size)
+	}
+	docs := allDocs[:size]
+	baseDir := b.TempDir()
+	indexFile := filepath.Join(baseDir, fmt.Sprintf("search-%d.idx", size))
+
+	b.StopTimer()
+	buildIndex(b, docs, indexFile)
+	eng, err := LoadEngine(indexFile)
+	if err != nil {
+		b.Fatalf("load engine: %v", err)
+	}
+	b.Cleanup(func() {
+		eng.Close()
+	})
+	if _, _, err := eng.Evaluate("the OR of OR to OR be OR in OR a"); err != nil {
+		b.Fatalf("warmup evaluate: %v", err)
+	}
+
+	terms := loadIndexTerms(indexFile)
+	if len(terms) == 0 {
+		b.Fatal("no terms found in index")
+	}
+	b.StartTimer()
+
+	return eng, terms
 }
 
 func BenchmarkSearch(b *testing.B) {
-	allDocs := loadAllDocuments(b)
-
 	for _, size := range benchmarkSizes(b) {
 		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
-			if len(allDocs) < size {
-				b.Skipf("not enough documents: got %d, need %d", len(allDocs), size)
-			}
-			docs := allDocs[:size]
-			baseDir := b.TempDir()
-			indexFile := filepath.Join(baseDir, fmt.Sprintf("search-%d.idx", size))
+			eng, terms := benchmarkSearchEngine(b, size)
 
-			b.StopTimer()
-			buildIndex(b, docs, indexFile)
-			eng, err := LoadEngine(indexFile)
-			if err != nil {
-				b.Fatalf("load engine: %v", err)
-			}
-			b.Cleanup(func() {
-				eng.Close()
-			})
-			if _, err := eng.Search("the OR of OR to OR be OR in OR a"); err != nil {
-				b.Fatalf("warmup search: %v", err)
-			}
-			b.StartTimer()
-
-			for _, sq := range searchQueries {
-				b.Run(sq.name, func(b *testing.B) {
-					b.ReportAllocs()
-					nsQuerySamples := make([]float64, 0, 64)
-
-					for b.Loop() {
-						start := b.Elapsed()
-						_, err := eng.Search(sq.query)
-						elapsed := b.Elapsed() - start
-						if err != nil {
-							b.Fatalf("search %q: %v", sq.query, err)
-						}
-
-						nsQuerySamples = append(nsQuerySamples, float64(elapsed.Nanoseconds()))
+			for _, qt := range makeSearchQueryTypes() {
+				b.Run(qt.name, func(b *testing.B) {
+					rng := rand.New(rand.NewSource(42))
+					queries := make([]string, searchQueriesPerType)
+					for i := range queries {
+						queries[i] = qt.gen(rng, terms)
 					}
 
+					nsQuerySamples := make([]float64, 0, searchQueriesPerType*10)
+
+					for b.Loop() {
+						for _, q := range queries {
+							start := b.Elapsed()
+							_, _, err := eng.Evaluate(q)
+							elapsed := b.Elapsed() - start
+							if err != nil {
+								b.Fatalf("evaluate %q: %v", q, err)
+							}
+							nsQuerySamples = append(nsQuerySamples, float64(elapsed.Nanoseconds()))
+						}
+					}
+
+					b.StopTimer()
+					meanVal, _ := stats.Mean(nsQuerySamples)
+					b.ReportMetric(meanVal, "avg_ns/query")
+					b.ReportMetric(ci95(nsQuerySamples), "ci95_ns/query")
+				})
+			}
+		})
+	}
+}
+
+func BenchmarkSearchRank(b *testing.B) {
+	for _, size := range benchmarkSizes(b) {
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			eng, terms := benchmarkSearchEngine(b, size)
+
+			for _, qt := range makeSearchQueryTypes() {
+				b.Run(qt.name, func(b *testing.B) {
+					rng := rand.New(rand.NewSource(42))
+					queries := make([]string, searchQueriesPerType)
+					for i := range queries {
+						queries[i] = qt.gen(rng, terms)
+					}
+
+					nsQuerySamples := make([]float64, 0, searchQueriesPerType*10)
+
+					for b.Loop() {
+						for _, q := range queries {
+							start := b.Elapsed()
+							_, err := eng.Search(q)
+							elapsed := b.Elapsed() - start
+							if err != nil {
+								b.Fatalf("search %q: %v", q, err)
+							}
+							nsQuerySamples = append(nsQuerySamples, float64(elapsed.Nanoseconds()))
+						}
+					}
+
+					b.StopTimer()
+					meanVal, _ := stats.Mean(nsQuerySamples)
+					b.ReportMetric(meanVal, "avg_ns/query")
 					b.ReportMetric(ci95(nsQuerySamples), "ci95_ns/query")
 				})
 			}

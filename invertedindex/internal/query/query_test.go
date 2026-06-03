@@ -47,12 +47,44 @@ func TestParseOr(t *testing.T) {
 }
 
 func TestParseNot(t *testing.T) {
-	node, err := ParseQuery("cat NOT dog")
+	node, err := ParseQuery("cat AND NOT dog")
 	if err != nil {
 		t.Fatalf("parse NOT: %v", err)
 	}
-	if node.Type != nodeNot {
-		t.Errorf("node type: got %v, want NodeNot", node.Type)
+	if node.Type != nodeAnd {
+		t.Fatalf("root type: got %v, want NodeAnd", node.Type)
+	}
+	if len(node.Children) != 2 {
+		t.Fatalf("children count: got %d, want 2", len(node.Children))
+	}
+	if node.Children[0].Type != nodeTerm {
+		t.Errorf("left child type: got %v, want NodeTerm", node.Children[0].Type)
+	}
+	if node.Children[1].Type != nodeNot {
+		t.Errorf("right child type: got %v, want NodeNot", node.Children[1].Type)
+	}
+	if len(node.Children[1].Children) != 1 {
+		t.Fatalf("NOT children count: got %d, want 1", len(node.Children[1].Children))
+	}
+	if node.Children[1].Children[0].Term != "dog" {
+		t.Errorf("NOT child term: got %q, want %q", node.Children[1].Children[0].Term, "dog")
+	}
+}
+
+func TestParseNotSubquery(t *testing.T) {
+	node, err := ParseQuery("history AND NOT (russia AND china)")
+	if err != nil {
+		t.Fatalf("parse NOT subquery: %v", err)
+	}
+	if node.Type != nodeAnd {
+		t.Fatalf("root type: got %v, want NodeAnd", node.Type)
+	}
+	if node.Children[1].Type != nodeNot {
+		t.Fatalf("right child type: got %v, want NodeNot", node.Children[1].Type)
+	}
+	notChild := node.Children[1].Children[0]
+	if notChild.Type != nodeAnd {
+		t.Fatalf("NOT child type: got %v, want NodeAnd", notChild.Type)
 	}
 }
 
@@ -109,6 +141,20 @@ func TestCollectTerms(t *testing.T) {
 	}
 }
 
+func TestCollectTermsNotExcluded(t *testing.T) {
+	node, err := ParseQuery("cat AND NOT dog")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	terms := node.CollectTerms()
+	if len(terms) != 1 {
+		t.Fatalf("terms count: got %d, want 1 (NOT terms excluded)", len(terms))
+	}
+	if terms[0] != "cat" {
+		t.Errorf("term: got %q, want %q", terms[0], "cat")
+	}
+}
+
 func TestParseCaseInsensitive(t *testing.T) {
 	node, err := ParseQuery("Hello AND World")
 	if err != nil {
@@ -119,5 +165,23 @@ func TestParseCaseInsensitive(t *testing.T) {
 	}
 	if node.Children[1].Term != "world" {
 		t.Errorf("right term: got %q, want %q", node.Children[1].Term, "world")
+	}
+}
+
+func TestParseTermsWithKeywordPrefix(t *testing.T) {
+	tests := []string{
+		"andreu",
+		"fourcorner AND andreu",
+		"orthogneiss OR dzongsar",
+		"orchidaceae AND NOT damodara",
+		"einfachste ADJ grizold",
+		"johnscaddan NEAR/3 orchidaceae",
+		"(orthogneiss OR dzongsar) AND typewriting",
+	}
+	for _, q := range tests {
+		_, err := ParseQuery(q)
+		if err != nil {
+			t.Errorf("parse %q: %v", q, err)
+		}
 	}
 }

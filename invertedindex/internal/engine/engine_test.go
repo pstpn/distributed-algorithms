@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/pstpn/iidx/internal/index"
@@ -75,7 +76,29 @@ func TestSearchNot(t *testing.T) {
 	})
 	defer eng.Close()
 
-	result, err := eng.Search("hello NOT foo")
+	result, err := eng.Search("hello AND NOT foo")
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if len(result.Docs) != 1 {
+		t.Fatalf("result count: got %d, want 1", len(result.Docs))
+	}
+	if result.Docs[0].DocID != 1 {
+		t.Errorf("docID: got %d, want 1", result.Docs[0].DocID)
+	}
+}
+
+func TestSearchNotSubquery(t *testing.T) {
+	eng := buildTestEngine(t, []string{
+		"hello world",
+		"hello foo",
+		"world foo",
+		"hello bar",
+	})
+	defer eng.Close()
+
+	result, err := eng.Search("hello AND NOT (foo OR bar)")
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -145,23 +168,127 @@ func TestSearchSingleTerm(t *testing.T) {
 	}
 }
 
-func TestSearchComplexQuery(t *testing.T) {
-	eng := buildTestEngine(t, []string{
-		"cat dog pet",
-		"cat mouse",
-		"dog pet park",
-		"bird fish",
-	})
-	defer eng.Close()
-
-	result, err := eng.Search("(cat OR dog) AND pet")
-	if err != nil {
-		t.Fatalf("search: %v", err)
+func TestSearchComplex(t *testing.T) {
+	tests := []struct {
+		name    string
+		docs    []string
+		query   string
+		wantIDs []uint32
+	}{
+		{
+			name:    "OR_AND",
+			docs:    []string{"cat dog pet", "cat mouse", "dog pet park", "bird fish"},
+			query:   "(cat OR dog) AND pet",
+			wantIDs: []uint32{1, 3},
+		},
+		{
+			name:    "AND_NOT_simple",
+			docs:    []string{"hello world", "hello foo", "world foo"},
+			query:   "hello AND NOT foo",
+			wantIDs: []uint32{1},
+		},
+		{
+			name:    "AND_NOT_empty",
+			docs:    []string{"hello world", "hello foo wow", "world foo"},
+			query:   "hello AND NOT (foo AND wow)",
+			wantIDs: []uint32{1},
+		},
+		{
+			name:    "AND_NOT_subquery",
+			docs:    []string{"hello world", "hello foo", "world foo", "hello bar"},
+			query:   "hello AND NOT (foo OR bar)",
+			wantIDs: []uint32{1},
+		},
+		{
+			name:    "nested_OR_AND",
+			docs:    []string{"a b c", "a d", "e b", "e d"},
+			query:   "(a OR e) AND (b OR d)",
+			wantIDs: []uint32{1, 2, 3, 4},
+		},
+		{
+			name:    "OR_AND_NOT",
+			docs:    []string{"a b c", "a d", "b d", "c d"},
+			query:   "(a OR b) AND NOT d",
+			wantIDs: []uint32{1},
+		},
+		{
+			name:    "ADJ_AND",
+			docs:    []string{"hello world foo", "world hello", "hello beautiful world foo"},
+			query:   "hello ADJ world AND foo",
+			wantIDs: []uint32{1},
+		},
+		{
+			name:    "NEAR_AND_NOT",
+			docs:    []string{"hello world foo", "hello far world", "hello very far world foo"},
+			query:   "hello NEAR/2 world AND NOT foo",
+			wantIDs: []uint32{2},
+		},
+		{
+			name:    "deeply_nested",
+			docs:    []string{"a b c d", "a b e", "f c d", "a e d"},
+			query:   "(a AND b) AND (c OR d) AND NOT e",
+			wantIDs: []uint32{1},
+		},
+		{
+			name:    "OR_chain",
+			docs:    []string{"a", "b", "c", "d"},
+			query:   "a OR b OR c",
+			wantIDs: []uint32{1, 2, 3},
+		},
+		{
+			name:    "AND_chain",
+			docs:    []string{"a b c", "a b", "a c", "b c"},
+			query:   "a AND b AND c",
+			wantIDs: []uint32{1},
+		},
+		{
+			name:    "NOT_with_OR_and_AND",
+			docs:    []string{"red big fast car", "red small car", "blue big car", "red big truck"},
+			query:   "(red OR blue) AND car AND NOT big",
+			wantIDs: []uint32{2},
+		},
+		{
+			name:    "ADJ_OR_AND",
+			docs:    []string{"quick brown fox", "brown quick rabbit", "slow brown fox"},
+			query:   "(quick ADJ rabbit OR brown ADJ fox) AND NOT rabbit",
+			wantIDs: []uint32{1, 3},
+		},
+		{
+			name:    "ADJ_OR_AND_without_brackets",
+			docs:    []string{"quick brown fox", "brown quick rabbit", "slow brown fox"},
+			query:   "quick ADJ rabbit OR brown ADJ fox AND NOT rabbit",
+			wantIDs: []uint32{1, 2, 3},
+		},
 	}
 
-	if len(result.Docs) != 2 {
-		t.Fatalf("result count: got %d, want 2", len(result.Docs))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eng := buildTestEngine(t, tt.docs)
+			defer eng.Close()
+
+			result, err := eng.Search(tt.query)
+			if err != nil {
+				t.Fatalf("search: %v", err)
+			}
+
+			gotIDs := scoredDocIDs(result.Docs)
+			slices.Sort(gotIDs)
+			wantSorted := slices.Clone(tt.wantIDs)
+			slices.Sort(wantSorted)
+
+			if !slices.Equal(gotIDs, wantSorted) {
+				t.Fatalf("docIDs: got %v, want %v", gotIDs, wantSorted)
+			}
+		})
 	}
+}
+
+func scoredDocIDs(docs []ScoredDocument) []uint32 {
+	ids := make([]uint32, len(docs))
+	for i, d := range docs {
+		ids[i] = d.DocID
+	}
+	return ids
 }
 
 func TestSaveAndLoad(t *testing.T) {

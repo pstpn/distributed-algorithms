@@ -451,8 +451,7 @@ func TestSkipListPersisted(t *testing.T) {
 	}
 
 	pl2 := NewPostingList(pl.Postings(), pl.DF())
-	data := pl2.MarshalSkipList()
-	pl3 := NewPostingListWithSkipList(pl.Postings(), pl.DF(), data)
+	pl3 := NewPostingListWithSkipList(pl.Postings(), pl.DF(), pl2.skipLevels)
 
 	it2 := pl2.iterator()
 	it3 := pl3.iterator()

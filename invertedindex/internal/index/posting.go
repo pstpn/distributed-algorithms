@@ -1,7 +1,6 @@
 package index
 
 import (
-	"encoding/binary"
 	"math"
 	"sort"
 )
@@ -30,13 +29,11 @@ func NewPostingList(postings []Posting, df uint32) *PostingList {
 	return pl
 }
 
-func NewPostingListWithSkipList(postings []Posting, df uint32, skipListData []byte) *PostingList {
+func NewPostingListWithSkipList(postings []Posting, df uint32, levels []skipLevel) *PostingList {
 	pl := &PostingList{
-		postings: postings,
-		df:       df,
-	}
-	if len(skipListData) > 0 {
-		pl.skipLevels = unmarshalSkipList(skipListData)
+		postings:   postings,
+		df:         df,
+		skipLevels: levels,
 	}
 	return pl
 }
@@ -411,65 +408,37 @@ func mergePositions(p1, p2 []uint32) []uint32 {
 	return result
 }
 
-func (pl *PostingList) MarshalSkipList() []byte {
-	if len(pl.skipLevels) == 0 {
+func flattenSkipLevels(levels []skipLevel) []uint32 {
+	if len(levels) == 0 {
 		return nil
 	}
-
-	size := 2
-	for _, lvl := range pl.skipLevels {
-		size += 2 + len(lvl.indices)*4
-	}
-
-	buf := make([]byte, 0, size)
-	le := binary.LittleEndian
-
-	var tmp [2]byte
-	le.PutUint16(tmp[:], uint16(len(pl.skipLevels)))
-	buf = append(buf, tmp[:]...)
-
-	for _, lvl := range pl.skipLevels {
-		le.PutUint16(tmp[:], uint16(len(lvl.indices)))
-		buf = append(buf, tmp[:]...)
-
+	var flat []uint32
+	flat = append(flat, uint32(len(levels)))
+	for _, lvl := range levels {
+		flat = append(flat, uint32(len(lvl.indices)))
 		for _, idx := range lvl.indices {
-			var idxBuf [4]byte
-			le.PutUint32(idxBuf[:], uint32(idx))
-			buf = append(buf, idxBuf[:]...)
+			flat = append(flat, uint32(idx))
 		}
 	}
-
-	return buf
+	return flat
 }
 
-func unmarshalSkipList(data []byte) []skipLevel {
-	if len(data) < 2 {
+func reconstructSkipLevels(flat []uint32) []skipLevel {
+	if len(flat) == 0 {
 		return nil
 	}
-
-	le := binary.LittleEndian
-	numLevels := le.Uint16(data[0:2])
-	offset := 2
-
+	numLevels := flat[0]
 	levels := make([]skipLevel, 0, numLevels)
-	for i := uint16(0); i < numLevels; i++ {
-		if offset+2 > len(data) {
-			break
-		}
-		numIndices := le.Uint16(data[offset : offset+2])
-		offset += 2
-
+	off := uint32(1)
+	for i := uint32(0); i < numLevels && off < uint32(len(flat)); i++ {
+		numIndices := flat[off]
+		off++
 		indices := make([]int, 0, numIndices)
-		for j := uint16(0); j < numIndices; j++ {
-			if offset+4 > len(data) {
-				break
-			}
-			indices = append(indices, int(le.Uint32(data[offset:offset+4])))
-			offset += 4
+		for j := uint32(0); j < numIndices && off < uint32(len(flat)); j++ {
+			indices = append(indices, int(flat[off]))
+			off++
 		}
-
 		levels = append(levels, skipLevel{indices: indices})
 	}
-
 	return levels
 }

@@ -88,21 +88,42 @@ func (b *IndexBuilder) Save(filename string) error {
 
 	for _, term := range terms {
 		pl := b.postings[term]
-
 		pl.buildSkipList()
 
-		entries := make([]compression.PostingEntry, 0, pl.Len())
+		docIDs := make([]uint32, pl.Len())
+		tfs := make([]uint32, pl.Len())
+		var posDeltas []uint32
 		for i := 0; i < pl.Len(); i++ {
 			p := pl.Posting(i)
-			entries = append(entries, compression.PostingEntry{
-				DocID:     p.DocID,
-				Positions: p.Positions,
-			})
+			docIDs[i] = p.DocID
+			tfs[i] = uint32(len(p.Positions))
+			prev := uint32(0)
+			for _, pos := range p.Positions {
+				posDeltas = append(posDeltas, pos-prev)
+				prev = pos
+			}
 		}
-		compressed := compression.DeltaEncodePostings(entries)
-		skipListData := pl.MarshalSkipList()
 
-		writer.AddTerm(term, pl.DF(), compressed, skipListData)
+		docDeltas := make([]uint32, len(docIDs))
+		prev := uint32(0)
+		for i, id := range docIDs {
+			docDeltas[i] = id - prev
+			prev = id
+		}
+
+		skipListFlat := flattenSkipLevels(pl.skipLevels)
+
+		var flat []uint32
+		flat = append(flat, uint32(len(docDeltas)))
+		flat = append(flat, docDeltas...)
+		flat = append(flat, uint32(len(posDeltas)))
+		flat = append(flat, posDeltas...)
+		flat = append(flat, uint32(len(tfs)))
+		flat = append(flat, tfs...)
+		flat = append(flat, uint32(len(skipListFlat)))
+		flat = append(flat, skipListFlat...)
+
+		writer.AddTerm(term, pl.DF(), compression.Compress(flat))
 	}
 
 	if err := writer.Write(); err != nil {

@@ -27,7 +27,7 @@ func LoadInvertedIndex(filename string) (*InvertedIndex, error) {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 
-	termEntries, err := storage.ReadTermEntries(mmapStorage, header.IndexOffset, header.NumTerms)
+	termEntries, err := storage.ReadTermEntries(mmapStorage, header)
 	if err != nil {
 		mmapStorage.Close()
 		return nil, fmt.Errorf("read term entries: %w", err)
@@ -53,27 +53,46 @@ func (idx *InvertedIndex) GetPostings(term string) *PostingList {
 		return nil
 	}
 
-	var skipListData []byte
-	if entry.SkipListLength > 0 {
-		skipListData, _ = storage.ReadPostingsData(idx.mmapStorage, entry.PostingsOffset, entry.SkipListLength)
-	}
+	data := storage.ReadPostingsData(idx.mmapStorage, entry.PostingsOffset, entry.PostingsLength)
 
-	postingsOffset := entry.PostingsOffset + int64(entry.SkipListLength)
-	data, err := storage.ReadPostingsData(idx.mmapStorage, postingsOffset, entry.PostingsLength)
-	if err != nil {
-		return nil
-	}
+	flat := compression.Decompress(data)
 
-	entries := compression.DeltaDecodePostings(data)
-	postings := make([]Posting, 0, len(entries))
-	for _, e := range entries {
+	off := 0
+	nDocDeltas := int(flat[off])
+	off++
+	docDeltas := flat[off : off+nDocDeltas]
+	off += nDocDeltas
+	nPosDeltas := int(flat[off])
+	off++
+	posDeltas := flat[off : off+nPosDeltas]
+	off += nPosDeltas
+	nTfs := int(flat[off])
+	off++
+	tfs := flat[off : off+nTfs]
+	off += nTfs
+	nSkipList := int(flat[off])
+	off++
+	skipListFlat := flat[off : off+nSkipList]
+
+	postings := make([]Posting, 0, len(docDeltas))
+	docID := uint32(0)
+	po := 0
+	for i := 0; i < len(docDeltas); i++ {
+		docID += docDeltas[i]
+		positions := make([]uint32, tfs[i])
+		pos := uint32(0)
+		for j := uint32(0); j < tfs[i]; j++ {
+			pos += posDeltas[po]
+			positions[j] = pos
+			po++
+		}
 		postings = append(postings, Posting{
-			DocID:     e.DocID,
-			Positions: e.Positions,
+			DocID:     docID,
+			Positions: positions,
 		})
 	}
 
-	return NewPostingListWithSkipList(postings, entry.DocFreq, skipListData)
+	return NewPostingListWithSkipList(postings, entry.DocFreq, reconstructSkipLevels(skipListFlat))
 }
 
 func (idx *InvertedIndex) GetDocLength(docID uint32) uint32 {

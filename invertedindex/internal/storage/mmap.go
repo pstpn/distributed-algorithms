@@ -3,14 +3,12 @@ package storage
 import (
 	"fmt"
 	"os"
-
-	"golang.org/x/exp/mmap"
+	"syscall"
 )
 
 type MMapStorage struct {
-	file   *os.File
-	reader *mmap.ReaderAt
-	size   int64
+	file *os.File
+	data []byte
 }
 
 func OpenMMap(filename string) (*MMapStorage, error) {
@@ -25,34 +23,37 @@ func OpenMMap(filename string) (*MMapStorage, error) {
 		return nil, fmt.Errorf("stat file %s: %w", filename, err)
 	}
 
-	reader, err := mmap.Open(filename)
+	size := info.Size()
+	if size == 0 {
+		return &MMapStorage{file: file}, nil
+	}
+
+	data, err := syscall.Mmap(int(file.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		file.Close()
 		return nil, fmt.Errorf("mmap file %s: %w", filename, err)
 	}
 
 	return &MMapStorage{
-		file:   file,
-		reader: reader,
-		size:   info.Size(),
+		file: file,
+		data: data,
 	}, nil
 }
 
-func (m *MMapStorage) Read(offset int64, p []byte) (int, error) {
-	if offset >= m.size {
-		return 0, fmt.Errorf("offset %d beyond file size %d", offset, m.size)
-	}
-	return m.reader.ReadAt(p, offset)
+func (m *MMapStorage) Slice(offset int64, length int) []byte {
+	return m.data[offset : offset+int64(length)]
 }
 
 func (m *MMapStorage) Size() int64 {
-	return m.size
+	return int64(len(m.data))
 }
 
 func (m *MMapStorage) Close() error {
 	var firstErr error
-	if err := m.reader.Close(); err != nil && firstErr == nil {
-		firstErr = err
+	if m.data != nil {
+		if err := syscall.Munmap(m.data); err != nil {
+			firstErr = err
+		}
 	}
 	if err := m.file.Close(); err != nil && firstErr == nil {
 		firstErr = err

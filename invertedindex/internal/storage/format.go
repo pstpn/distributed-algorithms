@@ -6,58 +6,50 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/pstpn/iidx/internal/compression"
 )
 
 const (
-	version    uint32 = 1
-	magic             = "INVX"
-	headerSize        = 40
+	magic      = "INVX"
+	headerSize = 40
 )
 
 type Header struct {
 	Magic          [4]byte
-	Version        uint32
 	NumTerms       uint32
 	NumDocs        uint32
 	TotalTokens    uint64
-	IndexOffset    int64
 	PostingsOffset int64
+	DocLengthsSize uint32
 }
 
 func writeHeader(w io.Writer, h *Header) error {
 	buf := make([]byte, headerSize)
 	copy(buf[0:4], h.Magic[:])
 	le := binary.LittleEndian
-	le.PutUint32(buf[4:8], h.Version)
-	le.PutUint32(buf[8:12], h.NumTerms)
-	le.PutUint32(buf[12:16], h.NumDocs)
-	le.PutUint64(buf[16:24], h.TotalTokens)
-	le.PutUint64(buf[24:32], uint64(h.IndexOffset))
-	le.PutUint64(buf[32:40], uint64(h.PostingsOffset))
+	le.PutUint32(buf[4:8], h.NumTerms)
+	le.PutUint32(buf[8:12], h.NumDocs)
+	le.PutUint64(buf[12:20], h.TotalTokens)
+	le.PutUint64(buf[20:28], uint64(h.PostingsOffset))
+	le.PutUint32(buf[28:32], h.DocLengthsSize)
 	_, err := w.Write(buf)
 	return err
 }
 
 func ReadHeader(s *MMapStorage) (*Header, error) {
-	buf := make([]byte, headerSize)
-	if _, err := s.Read(0, buf); err != nil {
-		return nil, fmt.Errorf("read header: %w", err)
-	}
-
+	buf := s.Slice(0, headerSize)
 	h := &Header{}
 	copy(h.Magic[:], buf[0:4])
 	le := binary.LittleEndian
-	h.Version = le.Uint32(buf[4:8])
-	h.NumTerms = le.Uint32(buf[8:12])
-	h.NumDocs = le.Uint32(buf[12:16])
-	h.TotalTokens = le.Uint64(buf[16:24])
-	h.IndexOffset = int64(le.Uint64(buf[24:32]))
-	h.PostingsOffset = int64(le.Uint64(buf[32:40]))
-
+	h.NumTerms = le.Uint32(buf[4:8])
+	h.NumDocs = le.Uint32(buf[8:12])
+	h.TotalTokens = le.Uint64(buf[12:20])
+	h.PostingsOffset = int64(le.Uint64(buf[20:28]))
+	h.DocLengthsSize = le.Uint32(buf[28:32])
 	if string(h.Magic[:]) != magic {
 		return nil, fmt.Errorf("invalid magic: expected %q, got %q", magic, h.Magic[:])
 	}
-
 	return h, nil
 }
 
@@ -66,70 +58,6 @@ type TermEntry struct {
 	DocFreq        uint32
 	PostingsOffset int64
 	PostingsLength int32
-	SkipListLength int32
-}
-
-func writeTermEntry(w io.Writer, e *TermEntry) error {
-	le := binary.LittleEndian
-	buf := make([]byte, 2+4+8+4+4+len(e.Term))
-
-	le.PutUint16(buf[0:2], uint16(len(e.Term)))
-	copy(buf[2:], e.Term)
-	offset := 2 + len(e.Term)
-	le.PutUint32(buf[offset:offset+4], e.DocFreq)
-	le.PutUint64(buf[offset+4:offset+12], uint64(e.PostingsOffset))
-	le.PutUint32(buf[offset+12:offset+16], uint32(e.PostingsLength))
-	le.PutUint32(buf[offset+16:offset+20], uint32(e.SkipListLength))
-
-	_, err := w.Write(buf[:offset+20])
-	return err
-}
-
-func ReadTermEntries(s *MMapStorage, offset int64, count uint32) ([]TermEntry, error) {
-	entries := make([]TermEntry, 0, count)
-	currentOffset := offset
-
-	for i := uint32(0); i < count; i++ {
-		var termLenBuf [2]byte
-		if _, err := s.Read(currentOffset, termLenBuf[:]); err != nil {
-			return nil, fmt.Errorf("read term length at offset %d: %w", currentOffset, err)
-		}
-		le := binary.LittleEndian
-		termLen := le.Uint16(termLenBuf[:])
-		currentOffset += 2
-
-		termBuf := make([]byte, termLen)
-		if _, err := s.Read(currentOffset, termBuf); err != nil {
-			return nil, fmt.Errorf("read term at offset %d: %w", currentOffset, err)
-		}
-		currentOffset += int64(termLen)
-
-		var fields [20]byte
-		if _, err := s.Read(currentOffset, fields[:]); err != nil {
-			return nil, fmt.Errorf("read term fields at offset %d: %w", currentOffset, err)
-		}
-
-		entry := TermEntry{
-			Term:           string(termBuf),
-			DocFreq:        le.Uint32(fields[0:4]),
-			PostingsOffset: int64(le.Uint64(fields[4:12])),
-			PostingsLength: int32(le.Uint32(fields[12:16])),
-			SkipListLength: int32(le.Uint32(fields[16:20])),
-		}
-		currentOffset += 20
-
-		entries = append(entries, entry)
-	}
-
-	return entries, nil
-}
-
-func ReadPostingsData(s *MMapStorage, offset int64, length int32) ([]byte, error) {
-	buf := make([]byte, length)
-	if _, err := s.Read(offset, buf); err != nil {
-		return nil, fmt.Errorf("read postings at offset %d: %w", offset, err)
-	}
-	return buf, nil
 }
 
 type DocEntry struct {
@@ -142,7 +70,6 @@ type IndexWriter struct {
 	header      Header
 	termEntries []TermEntry
 	postings    [][]byte
-	skipLists   [][]byte
 	docLengths  []uint32
 }
 
@@ -151,35 +78,65 @@ func NewIndexWriter(filename string, numDocs uint32, totalTokens uint64, docLeng
 	if err != nil {
 		return nil, fmt.Errorf("create index file %s: %w", filename, err)
 	}
-
 	return &IndexWriter{
 		file:       file,
 		docLengths: docLengths,
 		header: Header{
-			Version:     version,
 			NumDocs:     numDocs,
 			TotalTokens: totalTokens,
 		},
 	}, nil
 }
 
-func (w *IndexWriter) AddTerm(term string, docFreq uint32, compressedPostings []byte, skipListData []byte) {
+func (w *IndexWriter) AddTerm(term string, docFreq uint32, compressedPostings []byte) {
 	w.termEntries = append(w.termEntries, TermEntry{
 		Term:    term,
 		DocFreq: docFreq,
 	})
 	w.postings = append(w.postings, compressedPostings)
-	w.skipLists = append(w.skipLists, skipListData)
 	w.header.NumTerms++
 }
 
 func (w *IndexWriter) Write() error {
 	defer w.file.Close()
-
 	le := binary.LittleEndian
 
 	copy(w.header.Magic[:], magic)
-	w.header.IndexOffset = headerSize
+
+	docFreqs := make([]uint32, len(w.termEntries))
+	postingsLengths := make([]uint32, len(w.termEntries))
+	relOffsets := make([]uint32, len(w.termEntries))
+
+	cumOffset := uint32(0)
+	for i := range w.termEntries {
+		docFreqs[i] = w.termEntries[i].DocFreq
+		postingsLengths[i] = uint32(len(w.postings[i]))
+		relOffsets[i] = cumOffset
+		cumOffset += uint32(len(w.postings[i]))
+	}
+
+	offsetDeltas := make([]uint32, len(relOffsets))
+	prev := uint32(0)
+	for i, off := range relOffsets {
+		offsetDeltas[i] = off - prev
+		prev = off
+	}
+
+	compressedDocFreqs := compression.Compress(docFreqs)
+	compressedOffsetDeltas := compression.Compress(offsetDeltas)
+	compressedPostingsLengths := compression.Compress(postingsLengths)
+	compressedDocLengths := compression.Compress(w.docLengths)
+
+	w.header.DocLengthsSize = uint32(len(compressedDocLengths))
+
+	termStringsSize := int64(0)
+	for _, entry := range w.termEntries {
+		termStringsSize += int64(2 + len(entry.Term))
+	}
+
+	compressedArraysSize := int64(len(compressedDocFreqs) + len(compressedOffsetDeltas) + len(compressedPostingsLengths))
+
+	w.header.PostingsOffset = headerSize + termStringsSize + compressedArraysSize + int64(len(compressedDocLengths))
 
 	if _, err := w.file.Seek(headerSize, io.SeekStart); err != nil {
 		return fmt.Errorf("seek past header: %w", err)
@@ -187,45 +144,31 @@ func (w *IndexWriter) Write() error {
 
 	bw := bufio.NewWriterSize(w.file, 256*1024)
 
-	termIndexSize := int64(0)
 	for _, entry := range w.termEntries {
-		termIndexSize += int64(2 + len(entry.Term) + 4 + 8 + 4 + 4)
-	}
-
-	docLengthsSize := int64(w.header.NumDocs) * 4
-
-	postingsOffset := headerSize + termIndexSize + docLengthsSize
-
-	currentPostingsOffset := postingsOffset
-	for i, postingData := range w.postings {
-		skipListData := w.skipLists[i]
-		w.termEntries[i].PostingsOffset = currentPostingsOffset
-		w.termEntries[i].PostingsLength = int32(len(postingData))
-		w.termEntries[i].SkipListLength = int32(len(skipListData))
-		currentPostingsOffset += int64(len(skipListData)) + int64(len(postingData))
-	}
-
-	for _, entry := range w.termEntries {
-		if err := writeTermEntry(bw, &entry); err != nil {
-			return fmt.Errorf("write term entry %q: %w", entry.Term, err)
+		var lenBuf [2]byte
+		le.PutUint16(lenBuf[:], uint16(len(entry.Term)))
+		if _, err := bw.Write(lenBuf[:]); err != nil {
+			return fmt.Errorf("write term length: %w", err)
+		}
+		if _, err := bw.WriteString(entry.Term); err != nil {
+			return fmt.Errorf("write term: %w", err)
 		}
 	}
 
-	docLengthsBuf := make([]byte, w.header.NumDocs*4)
-	for i, dl := range w.docLengths {
-		le.PutUint32(docLengthsBuf[i*4:], dl)
+	if _, err := bw.Write(compressedDocFreqs); err != nil {
+		return fmt.Errorf("write doc freqs: %w", err)
 	}
-	if _, err := bw.Write(docLengthsBuf); err != nil {
+	if _, err := bw.Write(compressedOffsetDeltas); err != nil {
+		return fmt.Errorf("write offset deltas: %w", err)
+	}
+	if _, err := bw.Write(compressedPostingsLengths); err != nil {
+		return fmt.Errorf("write postings lengths: %w", err)
+	}
+	if _, err := bw.Write(compressedDocLengths); err != nil {
 		return fmt.Errorf("write doc lengths: %w", err)
 	}
 
-	w.header.PostingsOffset = postingsOffset
 	for i, postingData := range w.postings {
-		if len(w.skipLists[i]) > 0 {
-			if _, err := bw.Write(w.skipLists[i]); err != nil {
-				return fmt.Errorf("write skip list for term %q: %w", w.termEntries[i].Term, err)
-			}
-		}
 		if _, err := bw.Write(postingData); err != nil {
 			return fmt.Errorf("write postings for term %q: %w", w.termEntries[i].Term, err)
 		}
@@ -245,18 +188,64 @@ func (w *IndexWriter) Write() error {
 	return w.file.Sync()
 }
 
-func ReadDocLengths(s *MMapStorage, header *Header) ([]uint32, error) {
-	offset := header.PostingsOffset - int64(header.NumDocs)*4
-
-	lengths := make([]uint32, header.NumDocs)
-	buf := make([]byte, 4)
+func ReadTermEntries(s *MMapStorage, header *Header) ([]TermEntry, error) {
+	offset := int64(headerSize)
 	le := binary.LittleEndian
-	for i := uint32(0); i < header.NumDocs; i++ {
-		if _, err := s.Read(offset+int64(i)*4, buf); err != nil {
-			return nil, fmt.Errorf("read doc length %d: %w", i, err)
-		}
-		lengths[i] = le.Uint32(buf)
+
+	terms := make([]string, 0, header.NumTerms)
+	for i := uint32(0); i < header.NumTerms; i++ {
+		lenBuf := s.Slice(offset, 2)
+		termLen := le.Uint16(lenBuf)
+		offset += 2
+
+		termBuf := s.Slice(offset, int(termLen))
+		offset += int64(termLen)
+		terms = append(terms, string(termBuf))
 	}
 
-	return lengths, nil
+	compressedSectionEnd := header.PostingsOffset - int64(header.DocLengthsSize)
+	compressedSectionSize := compressedSectionEnd - offset
+	if compressedSectionSize <= 0 {
+		return nil, fmt.Errorf("invalid compressed section size: %d", compressedSectionSize)
+	}
+
+	buf := s.Slice(offset, int(compressedSectionSize))
+
+	off := 0
+	docFreqs := compression.Decompress(buf[off:])
+	off += compression.CompressedSize(buf[off:])
+
+	offsetDeltas := compression.Decompress(buf[off:])
+	off += compression.CompressedSize(buf[off:])
+
+	postingsLengths := compression.Decompress(buf[off:])
+
+	postingsOffsets := make([]uint32, len(offsetDeltas))
+	prev := uint32(0)
+	for i, d := range offsetDeltas {
+		prev += d
+		postingsOffsets[i] = prev
+	}
+
+	entries := make([]TermEntry, len(terms))
+	for i := range terms {
+		entries[i] = TermEntry{
+			Term:           terms[i],
+			DocFreq:        docFreqs[i],
+			PostingsOffset: header.PostingsOffset + int64(postingsOffsets[i]),
+			PostingsLength: int32(postingsLengths[i]),
+		}
+	}
+
+	return entries, nil
+}
+
+func ReadPostingsData(s *MMapStorage, offset int64, length int32) []byte {
+	return s.Slice(offset, int(length))
+}
+
+func ReadDocLengths(s *MMapStorage, header *Header) ([]uint32, error) {
+	offset := header.PostingsOffset - int64(header.DocLengthsSize)
+	buf := s.Slice(offset, int(header.DocLengthsSize))
+	return compression.Decompress(buf), nil
 }

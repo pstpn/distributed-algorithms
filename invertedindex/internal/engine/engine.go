@@ -44,28 +44,26 @@ func LoadEngine(filename string) (*Engine, error) {
 	}, nil
 }
 
-func (e *Engine) Search(queryStr string) (*SearchResult, error) {
+func (e *Engine) Evaluate(queryStr string) (*index.PostingList, map[string]*index.PostingList, error) {
 	node, err := query.ParseQuery(queryStr)
 	if err != nil {
-		return nil, fmt.Errorf("parse query: %w", err)
+		return nil, nil, fmt.Errorf("parse query: %w", err)
 	}
 
 	evaluator := query.NewEvaluator(e.idx)
 	pl := evaluator.Evaluate(node)
+	return pl, evaluator.TermPostings, nil
+}
 
-	terms := node.CollectTerms()
-	termPostings := make(map[string]*index.PostingList, len(terms))
-	for _, term := range terms {
-		if tpl := e.idx.GetPostings(term); tpl != nil {
-			termPostings[term] = tpl
-		}
+func (e *Engine) Search(queryStr string) (*SearchResult, error) {
+	pl, termPostings, err := e.Evaluate(queryStr)
+	if err != nil {
+		return nil, err
 	}
 
 	scoredDocs := e.ranker.RankResults(pl, termPostings)
 
-	result := &SearchResult{
-		Docs: make([]ScoredDocument, 0, len(scoredDocs)),
-	}
+	result := &SearchResult{Docs: make([]ScoredDocument, 0, len(scoredDocs))}
 	for _, sd := range scoredDocs {
 		result.Docs = append(result.Docs, ScoredDocument{
 			DocID: sd.DocID,

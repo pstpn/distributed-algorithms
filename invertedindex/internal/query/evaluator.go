@@ -5,11 +5,15 @@ import (
 )
 
 type Evaluator struct {
-	idx *index.InvertedIndex
+	idx          *index.InvertedIndex
+	TermPostings map[string]*index.PostingList
 }
 
 func NewEvaluator(idx *index.InvertedIndex) *Evaluator {
-	return &Evaluator{idx: idx}
+	return &Evaluator{
+		idx:          idx,
+		TermPostings: make(map[string]*index.PostingList),
+	}
 }
 
 func (e *Evaluator) Evaluate(node *Node) *index.PostingList {
@@ -36,16 +40,29 @@ func (e *Evaluator) Evaluate(node *Node) *index.PostingList {
 }
 
 func (e *Evaluator) evaluateTerm(node *Node) *index.PostingList {
+	if pl, ok := e.TermPostings[node.Term]; ok {
+		return pl
+	}
 	pl := e.idx.GetPostings(node.Term)
 	if pl == nil {
 		return index.NewPostingList(nil, 0)
 	}
+	e.TermPostings[node.Term] = pl
 	return pl
 }
 
 func (e *Evaluator) evaluateAnd(node *Node) *index.PostingList {
-	left := e.Evaluate(node.Children[0])
-	right := e.Evaluate(node.Children[1])
+	leftNode := node.Children[0]
+	rightNode := node.Children[1]
+
+	if rightNode.Type == nodeNot {
+		left := e.Evaluate(leftNode)
+		right := e.Evaluate(rightNode.Children[0])
+		return index.Difference(left, right)
+	}
+
+	left := e.Evaluate(leftNode)
+	right := e.Evaluate(rightNode)
 	return index.Intersect(left, right)
 }
 
@@ -56,9 +73,7 @@ func (e *Evaluator) evaluateOr(node *Node) *index.PostingList {
 }
 
 func (e *Evaluator) evaluateNot(node *Node) *index.PostingList {
-	left := e.Evaluate(node.Children[0])
-	right := e.Evaluate(node.Children[1])
-	return index.Difference(left, right)
+	return index.NewPostingList(nil, 0)
 }
 
 func (e *Evaluator) evaluateAdj(node *Node) *index.PostingList {

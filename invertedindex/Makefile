@@ -5,7 +5,7 @@ PROFILE_SIZE   ?= 10000
 PROFILE_QUERY  ?= cat AND dog OR hello NEAR/5 world
 PROFILE_ROUNDS ?= 1000
 
-BENCH_SIZES    ?= 10000,25000,50000,75000,100000,125000,150000,175000
+BENCH_SIZES    ?= 10000,25000,50000,75000,100000,125000,150000,200000
 BUILD_SIZES    ?= 500,700,1000,2000,3000,4000
 BENCH_RAW_DIR  := data/bench
 BENCH_PLOT_DIR := data/results
@@ -30,6 +30,7 @@ profile-build:
 	go run ./cmd/profile \
 		-mode build \
 		-size $(PROFILE_SIZE) \
+		-rounds $(PROFILE_ROUNDS) \
 		-cpuprofile data/profiles/build.pprof
 
 profile-search:
@@ -51,7 +52,7 @@ render-search:
 
 bench-collect:
 	mkdir -p $(BENCH_RAW_DIR) $(BENCH_PLOT_DIR)
-	BUILD_SIZES='$(BUILD_SIZES)' SIZES='$(BENCH_SIZES)' go test -run '^$$' -bench 'Benchmark' -benchmem ./internal/engine/ -timeout 1m > $(BENCH_RAW_DIR)/benchmarks.txt
+	BUILD_SIZES='$(BUILD_SIZES)' SIZES='$(BENCH_SIZES)' go test -run '^$$' -bench 'Benchmark' ./internal/engine/ -timeout 1m > $(BENCH_RAW_DIR)/benchmarks.txt
 	awk -v raw_dir='$(BENCH_RAW_DIR)' -f scripts/collect_bench.awk $(BENCH_RAW_DIR)/benchmarks.txt > $(BENCH_RAW_DIR)/benchmarks.csv
 
 bench-plot:

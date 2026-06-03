@@ -125,11 +125,7 @@ func OpenDocStore(filename string) (*DocStore, error) {
 		return nil, fmt.Errorf("open mmap: %w", err)
 	}
 
-	buf := make([]byte, docStoreHeaderSize)
-	if _, err := storage.Read(0, buf); err != nil {
-		storage.Close()
-		return nil, fmt.Errorf("read header: %w", err)
-	}
+	buf := storage.Slice(0, docStoreHeaderSize)
 
 	h := DocStoreHeader{}
 	copy(h.Magic[:], buf[0:4])
@@ -208,47 +204,31 @@ func (ds *DocStore) Close() error {
 }
 
 func (ds *DocStore) readDocOffset(docID uint32) (int64, error) {
-	var offBuf [8]byte
 	tableOffset := int64(docStoreHeaderSize) + int64(docID-1)*8
-	if _, err := ds.storage.Read(tableOffset, offBuf[:]); err != nil {
-		return 0, fmt.Errorf("read doc offset for docID %d: %w", docID, err)
-	}
-	return int64(binary.LittleEndian.Uint64(offBuf[:])), nil
+	offBuf := ds.storage.Slice(tableOffset, 8)
+	return int64(binary.LittleEndian.Uint64(offBuf)), nil
 }
 
 func (ds *DocStore) readDocData(offset int64) (string, string, error) {
 	le := binary.LittleEndian
-	var lenBuf [4]byte
 
-	if _, err := ds.storage.Read(offset, lenBuf[:]); err != nil {
-		return "", "", fmt.Errorf("read doc title length at offset %d: %w", offset, err)
-	}
-	titleLen := le.Uint32(lenBuf[:])
+	lenBuf := ds.storage.Slice(offset, 4)
+	titleLen := le.Uint32(lenBuf)
 	offset += 4
 
 	var title string
 	if titleLen > 0 {
-		titleBuf := make([]byte, titleLen)
-		if _, err := ds.storage.Read(offset, titleBuf); err != nil {
-			return "", "", fmt.Errorf("read doc title at offset %d: %w", offset, err)
-		}
-		title = string(titleBuf)
+		title = string(ds.storage.Slice(offset, int(titleLen)))
 	}
 	offset += int64(titleLen)
 
-	if _, err := ds.storage.Read(offset, lenBuf[:]); err != nil {
-		return "", "", fmt.Errorf("read doc text length at offset %d: %w", offset, err)
-	}
-	textLen := le.Uint32(lenBuf[:])
+	lenBuf = ds.storage.Slice(offset, 4)
+	textLen := le.Uint32(lenBuf)
 	offset += 4
 
 	var text string
 	if textLen > 0 {
-		textBuf := make([]byte, textLen)
-		if _, err := ds.storage.Read(offset, textBuf); err != nil {
-			return "", "", fmt.Errorf("read doc text at offset %d: %w", offset, err)
-		}
-		text = string(textBuf)
+		text = string(ds.storage.Slice(offset, int(textLen)))
 	}
 
 	return title, text, nil

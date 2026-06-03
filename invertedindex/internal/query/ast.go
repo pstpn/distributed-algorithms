@@ -39,10 +39,10 @@ func newOrNode(left, right *Node) *Node {
 	}
 }
 
-func newNotNode(left, right *Node) *Node {
+func newNotNode(child *Node) *Node {
 	return &Node{
 		Type:     nodeNot,
-		Children: []*Node{left, right},
+		Children: []*Node{child},
 	}
 }
 
@@ -65,6 +65,8 @@ func (n *Node) CollectTerms() []string {
 	switch n.Type {
 	case nodeTerm:
 		return []string{n.Term}
+	case nodeNot:
+		return nil
 	default:
 		var terms []string
 		for _, child := range n.Children {

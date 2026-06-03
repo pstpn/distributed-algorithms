@@ -21,11 +21,11 @@ func ParseQuery(queryStr string) (*Node, error) {
 
 var queryLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{"Whitespace", `\s+`},
-	{"And", `AND`},
-	{"Or", `OR`},
-	{"Not", `NOT`},
-	{"Adj", `ADJ`},
-	{"NearDist", `NEAR/\d+`},
+	{"And", `\bAND\b`},
+	{"Or", `\bOR\b`},
+	{"Not", `\bNOT\b`},
+	{"Adj", `\bADJ\b`},
+	{"NearDist", `\bNEAR/\d+\b`},
 	{"Word", `[A-Z0-9_]+`},
 	{"Lparen", `\(`},
 	{"Rparen", `\)`},
@@ -41,18 +41,18 @@ type pOrExpr struct {
 }
 
 type pAndExpr struct {
-	Left  *pNotExpr      `@@`
+	Left  *pUnaryExpr    `@@`
 	Right []*pAndOperand `@@*`
 }
 
 type pAndOperand struct {
-	Op   string    `@(And|Adj|NearDist)`
-	Expr *pNotExpr `@@`
+	Op   string      `@(And|Adj|NearDist)`
+	Expr *pUnaryExpr `@@`
 }
 
-type pNotExpr struct {
-	Left  *pPrimary   `@@`
-	Right []*pPrimary `("NOT" @@)*`
+type pUnaryExpr struct {
+	Negated *pPrimary `"NOT" @@`
+	Pos     *pPrimary `| @@`
 }
 
 type pPrimary struct {
@@ -81,9 +81,9 @@ func convertOrExpr(e *pOrExpr) *Node {
 }
 
 func convertAndExpr(e *pAndExpr) *Node {
-	left := convertNotExpr(e.Left)
+	left := convertUnaryExpr(e.Left)
 	for _, r := range e.Right {
-		right := convertNotExpr(r.Expr)
+		right := convertUnaryExpr(r.Expr)
 		op := r.Op
 		if strings.HasPrefix(op, "NEAR") {
 			distance := parseNearDistance(op)
@@ -100,12 +100,11 @@ func convertAndExpr(e *pAndExpr) *Node {
 	return left
 }
 
-func convertNotExpr(e *pNotExpr) *Node {
-	left := convertPrimary(e.Left)
-	for _, right := range e.Right {
-		left = newNotNode(left, convertPrimary(right))
+func convertUnaryExpr(e *pUnaryExpr) *Node {
+	if e.Negated != nil {
+		return newNotNode(convertPrimary(e.Negated))
 	}
-	return left
+	return convertPrimary(e.Pos)
 }
 
 func convertPrimary(p *pPrimary) *Node {
