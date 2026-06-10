@@ -61,6 +61,7 @@ cmake-build-debug/
 .DS_Store
 .idea/
 FlameGraph/
+.venv/
 
 # Data
 data/
