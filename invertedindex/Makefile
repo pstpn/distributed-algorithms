@@ -61,7 +61,11 @@ bench-plot:
 
 bench: bench-collect bench-plot
 
+compression:
+	mkdir -p $(BENCH_RAW_DIR) $(BENCH_PLOT_DIR)
+	go run ./cmd/compression -data $(DATA_DOCS) -output $(BENCH_RAW_DIR) -sizes '$(BENCH_SIZES)'
+
 report:
 	cd report && /usr/local/bin/pdflatex -synctex=1 -interaction=nonstopmode "report".tex >/dev/null
 
-.PHONY: test tui parse profile-build profile-search render-build render-search build bench-collect bench-plot bench report
+.PHONY: test tui parse profile-build profile-search render-build render-search build bench-collect bench-plot bench compression report

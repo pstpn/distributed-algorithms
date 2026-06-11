@@ -72,4 +72,22 @@ set ylabel "MB"
 plot \
 	raw_dir . "/index_size.csv" using 1:($2/1e6) with linespoints linewidth 2 pt 7 title "index"
 
+set output plot_dir . "/compression_size.pdf"
+set title "Index compression"
+set xlabel "Number of documents"
+set ylabel "MB"
+set key inside left top
+set autoscale xfix
+plot \
+	raw_dir . "/compression.csv" using 1:($7/1e6) with linespoints linewidth 2 pt 7 lc rgb "red" title "Raw (uint32)", \
+	raw_dir . "/compression.csv" using 1:($8/1e6) with linespoints linewidth 2 pt 7 lc rgb "blue" title "Compressed (bitpacking)"
+
+set output plot_dir . "/compression_ratio.pdf"
+set title "Index compression ratio"
+set xlabel "Number of documents"
+set ylabel "Compression ratio"
+set key off
+plot \
+	raw_dir . "/compression.csv" using 1:9 with linespoints linewidth 2 pt 7 lc rgb "dark-green"
+
 set logscale y 10
