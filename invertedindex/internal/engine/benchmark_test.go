@@ -171,7 +171,7 @@ func loadIndexTerms(indexFile string) []string {
 	}
 
 	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].DocFreq < filtered[j].DocFreq
+		return filtered[i].PostingsLength < filtered[j].PostingsLength
 	})
 
 	cutoff := len(filtered) / 2

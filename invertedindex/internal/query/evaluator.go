@@ -18,7 +18,7 @@ func NewEvaluator(idx *index.InvertedIndex) *Evaluator {
 
 func (e *Evaluator) Evaluate(node *Node) *index.PostingList {
 	if node == nil {
-		return index.NewPostingList(nil, 0)
+		return index.NewPostingList(nil)
 	}
 
 	switch node.Type {
@@ -35,7 +35,7 @@ func (e *Evaluator) Evaluate(node *Node) *index.PostingList {
 	case nodeNear:
 		return e.evaluateNear(node)
 	default:
-		return index.NewPostingList(nil, 0)
+		return index.NewPostingList(nil)
 	}
 }
 
@@ -45,7 +45,7 @@ func (e *Evaluator) evaluateTerm(node *Node) *index.PostingList {
 	}
 	pl := e.idx.GetPostings(node.Term)
 	if pl == nil {
-		return index.NewPostingList(nil, 0)
+		return index.NewPostingList(nil)
 	}
 	e.TermPostings[node.Term] = pl
 	return pl
@@ -73,7 +73,7 @@ func (e *Evaluator) evaluateOr(node *Node) *index.PostingList {
 }
 
 func (e *Evaluator) evaluateNot(node *Node) *index.PostingList {
-	return index.NewPostingList(nil, 0)
+	return index.NewPostingList(nil)
 }
 
 func (e *Evaluator) evaluateAdj(node *Node) *index.PostingList {

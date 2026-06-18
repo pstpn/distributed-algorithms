@@ -47,7 +47,7 @@ func TestAddDocument(t *testing.T) {
 		t.Errorf("postings for 'hello': got %d, want 2", pl.Len())
 	}
 	if pl.DF() != 2 {
-		t.Errorf("df for 'hello': got %d, want 2", pl.DF())
+		t.Errorf("DF() for 'hello': got %d, want 2", pl.DF())
 	}
 
 	pl = idx.GetPostings("world")
@@ -77,13 +77,13 @@ func TestIntersect(t *testing.T) {
 		{DocID: 1, Positions: []uint32{0}},
 		{DocID: 3, Positions: []uint32{2}},
 		{DocID: 5, Positions: []uint32{4}},
-	}, 3)
+	})
 
 	pl2 := NewPostingList([]Posting{
 		{DocID: 2, Positions: []uint32{1}},
 		{DocID: 3, Positions: []uint32{3}},
 		{DocID: 5, Positions: []uint32{5}},
-	}, 3)
+	})
 
 	result := Intersect(pl1, pl2)
 
@@ -103,12 +103,12 @@ func TestUnion(t *testing.T) {
 	pl1 := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{0}},
 		{DocID: 3, Positions: []uint32{2}},
-	}, 2)
+	})
 
 	pl2 := NewPostingList([]Posting{
 		{DocID: 2, Positions: []uint32{1}},
 		{DocID: 3, Positions: []uint32{3}},
-	}, 2)
+	})
 
 	result := Union(pl1, pl2)
 
@@ -129,12 +129,12 @@ func TestDifference(t *testing.T) {
 		{DocID: 1, Positions: []uint32{0}},
 		{DocID: 3, Positions: []uint32{2}},
 		{DocID: 5, Positions: []uint32{4}},
-	}, 3)
+	})
 
 	pl2 := NewPostingList([]Posting{
 		{DocID: 3, Positions: []uint32{3}},
 		{DocID: 5, Positions: []uint32{5}},
-	}, 2)
+	})
 
 	result := Difference(pl1, pl2)
 
@@ -151,12 +151,12 @@ func TestAdjacent(t *testing.T) {
 	pl1 := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{0, 5}},
 		{DocID: 2, Positions: []uint32{3}},
-	}, 2)
+	})
 
 	pl2 := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{1, 6}},
 		{DocID: 2, Positions: []uint32{5}},
-	}, 2)
+	})
 
 	result := Adjacent(pl1, pl2)
 
@@ -173,12 +173,12 @@ func TestNear(t *testing.T) {
 	pl1 := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{0, 10}},
 		{DocID: 2, Positions: []uint32{3}},
-	}, 2)
+	})
 
 	pl2 := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{3, 12}},
 		{DocID: 2, Positions: []uint32{10}},
-	}, 2)
+	})
 
 	result := Near(pl1, pl2, 3)
 
@@ -194,15 +194,15 @@ func TestNear(t *testing.T) {
 func TestNearChained(t *testing.T) {
 	plA := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{5, 50}},
-	}, 1)
+	})
 
 	plB := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{10, 55}},
-	}, 1)
+	})
 
 	plC := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{12, 60}},
-	}, 1)
+	})
 
 	near1 := Near(plA, plB, 1000)
 	if near1.Len() != 1 {
@@ -236,11 +236,11 @@ func TestNearChained(t *testing.T) {
 func TestNearPositionsSorted(t *testing.T) {
 	pl1 := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{5, 50}},
-	}, 1)
+	})
 
 	pl2 := NewPostingList([]Posting{
 		{DocID: 1, Positions: []uint32{10, 55}},
-	}, 1)
+	})
 
 	result := Near(pl1, pl2, 1000)
 	if result.Len() != 1 {
@@ -264,7 +264,7 @@ func TestSkipList(t *testing.T) {
 		}
 	}
 
-	pl := NewPostingList(postings, 1000)
+	pl := NewPostingList(postings)
 
 	if len(pl.skipLevels) == 0 {
 		t.Error("skip list not built")
@@ -316,7 +316,7 @@ func TestSkipListLevels(t *testing.T) {
 		postings[i] = Posting{DocID: uint32(i + 1)}
 	}
 
-	pl := NewPostingList(postings, uint32(n))
+	pl := NewPostingList(postings)
 
 	if len(pl.skipLevels) < 2 {
 		t.Errorf("expected >= 2 skip levels for n=%d, got %d", n, len(pl.skipLevels))
@@ -450,8 +450,8 @@ func TestSkipListPersisted(t *testing.T) {
 		t.Errorf("skipTo(50): got docID %d, want 50", it.currentDocID())
 	}
 
-	pl2 := NewPostingList(pl.Postings(), pl.DF())
-	pl3 := NewPostingListWithSkipList(pl.Postings(), pl.DF(), pl2.skipLevels)
+	pl2 := NewPostingList(pl.Postings())
+	pl3 := NewPostingListWithSkipList(pl.Postings(), pl2.skipLevels)
 
 	it2 := pl2.iterator()
 	it3 := pl3.iterator()

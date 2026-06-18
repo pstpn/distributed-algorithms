@@ -55,7 +55,6 @@ func ReadHeader(s *MMapStorage) (*Header, error) {
 
 type TermEntry struct {
 	Term           string
-	DocFreq        uint32
 	PostingsOffset int64
 	PostingsLength int32
 }
@@ -88,10 +87,9 @@ func NewIndexWriter(filename string, numDocs uint32, totalTokens uint64, docLeng
 	}, nil
 }
 
-func (w *IndexWriter) AddTerm(term string, docFreq uint32, compressedPostings []byte) {
+func (w *IndexWriter) AddTerm(term string, compressedPostings []byte) {
 	w.termEntries = append(w.termEntries, TermEntry{
-		Term:    term,
-		DocFreq: docFreq,
+		Term: term,
 	})
 	w.postings = append(w.postings, compressedPostings)
 	w.header.NumTerms++
@@ -103,13 +101,11 @@ func (w *IndexWriter) Write() error {
 
 	copy(w.header.Magic[:], magic)
 
-	docFreqs := make([]uint32, len(w.termEntries))
 	postingsLengths := make([]uint32, len(w.termEntries))
 	relOffsets := make([]uint32, len(w.termEntries))
 
 	cumOffset := uint32(0)
 	for i := range w.termEntries {
-		docFreqs[i] = w.termEntries[i].DocFreq
 		postingsLengths[i] = uint32(len(w.postings[i]))
 		relOffsets[i] = cumOffset
 		cumOffset += uint32(len(w.postings[i]))
@@ -122,7 +118,6 @@ func (w *IndexWriter) Write() error {
 		prev = off
 	}
 
-	compressedDocFreqs := compression.Compress(docFreqs)
 	compressedOffsetDeltas := compression.Compress(offsetDeltas)
 	compressedPostingsLengths := compression.Compress(postingsLengths)
 	compressedDocLengths := compression.Compress(w.docLengths)
@@ -134,7 +129,7 @@ func (w *IndexWriter) Write() error {
 		termStringsSize += int64(2 + len(entry.Term))
 	}
 
-	compressedArraysSize := int64(len(compressedDocFreqs) + len(compressedOffsetDeltas) + len(compressedPostingsLengths))
+	compressedArraysSize := int64(len(compressedOffsetDeltas) + len(compressedPostingsLengths))
 
 	w.header.PostingsOffset = headerSize + termStringsSize + compressedArraysSize + int64(len(compressedDocLengths))
 
@@ -155,9 +150,6 @@ func (w *IndexWriter) Write() error {
 		}
 	}
 
-	if _, err := bw.Write(compressedDocFreqs); err != nil {
-		return fmt.Errorf("write doc freqs: %w", err)
-	}
 	if _, err := bw.Write(compressedOffsetDeltas); err != nil {
 		return fmt.Errorf("write offset deltas: %w", err)
 	}
@@ -212,8 +204,6 @@ func ReadTermEntries(s *MMapStorage, header *Header) ([]TermEntry, error) {
 	buf := s.Slice(offset, int(compressedSectionSize))
 
 	off := 0
-	docFreqs := compression.Decompress(buf[off:])
-	off += compression.CompressedSize(buf[off:])
 
 	offsetDeltas := compression.Decompress(buf[off:])
 	off += compression.CompressedSize(buf[off:])
@@ -231,7 +221,6 @@ func ReadTermEntries(s *MMapStorage, header *Header) ([]TermEntry, error) {
 	for i := range terms {
 		entries[i] = TermEntry{
 			Term:           terms[i],
-			DocFreq:        docFreqs[i],
 			PostingsOffset: header.PostingsOffset + int64(postingsOffsets[i]),
 			PostingsLength: int32(postingsLengths[i]),
 		}

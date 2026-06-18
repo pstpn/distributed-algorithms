@@ -17,22 +17,19 @@ type skipLevel struct {
 type PostingList struct {
 	postings   []Posting
 	skipLevels []skipLevel
-	df         uint32
 }
 
-func NewPostingList(postings []Posting, df uint32) *PostingList {
+func NewPostingList(postings []Posting) *PostingList {
 	pl := &PostingList{
 		postings: postings,
-		df:       df,
 	}
 	pl.buildSkipList()
 	return pl
 }
 
-func NewPostingListWithSkipList(postings []Posting, df uint32, levels []skipLevel) *PostingList {
+func NewPostingListWithSkipList(postings []Posting, levels []skipLevel) *PostingList {
 	pl := &PostingList{
 		postings:   postings,
-		df:         df,
 		skipLevels: levels,
 	}
 	return pl
@@ -64,7 +61,7 @@ func (pl *PostingList) Len() int {
 }
 
 func (pl *PostingList) DF() uint32 {
-	return pl.df
+	return uint32(len(pl.postings))
 }
 
 func (pl *PostingList) Posting(i int) Posting {
@@ -193,8 +190,7 @@ func Intersect(pl1, pl2 *PostingList) *PostingList {
 		}
 	}
 
-	df := uint32(len(result))
-	return NewPostingList(result, df)
+	return NewPostingList(result)
 }
 
 func Union(pl1, pl2 *PostingList) *PostingList {
@@ -228,8 +224,7 @@ func Union(pl1, pl2 *PostingList) *PostingList {
 		result = append(result, pl2.Posting(j))
 	}
 
-	df := uint32(len(result))
-	return NewPostingList(result, df)
+	return NewPostingList(result)
 }
 
 func Difference(pl1, pl2 *PostingList) *PostingList {
@@ -251,8 +246,7 @@ func Difference(pl1, pl2 *PostingList) *PostingList {
 		result = append(result, p1)
 	}
 
-	df := uint32(len(result))
-	return NewPostingList(result, df)
+	return NewPostingList(result)
 }
 
 func Adjacent(pl1, pl2 *PostingList) *PostingList {
@@ -308,8 +302,7 @@ func Adjacent(pl1, pl2 *PostingList) *PostingList {
 		}
 	}
 
-	df := uint32(len(result))
-	return NewPostingList(result, df)
+	return NewPostingList(result)
 }
 
 func Near(pl1, pl2 *PostingList, distance int) *PostingList {
@@ -361,8 +354,7 @@ func Near(pl1, pl2 *PostingList, distance int) *PostingList {
 		}
 	}
 
-	df := uint32(len(result))
-	return NewPostingList(result, df)
+	return NewPostingList(result)
 }
 
 func (pl *PostingList) FindPositions(docID uint32) []uint32 {

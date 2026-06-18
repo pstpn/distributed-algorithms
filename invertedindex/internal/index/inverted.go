@@ -92,7 +92,7 @@ func (idx *InvertedIndex) GetPostings(term string) *PostingList {
 		})
 	}
 
-	return NewPostingListWithSkipList(postings, entry.DocFreq, reconstructSkipLevels(skipListFlat))
+	return NewPostingListWithSkipList(postings, reconstructSkipLevels(skipListFlat))
 }
 
 func (idx *InvertedIndex) GetDocLength(docID uint32) uint32 {
@@ -100,14 +100,6 @@ func (idx *InvertedIndex) GetDocLength(docID uint32) uint32 {
 		return 0
 	}
 	return idx.docLengths[docID-1]
-}
-
-func (idx *InvertedIndex) GetDocFreq(term string) uint32 {
-	entry := idx.findTermEntry(term)
-	if entry == nil {
-		return 0
-	}
-	return entry.DocFreq
 }
 
 func (idx *InvertedIndex) GetTermFreq(term string, docID uint32) uint32 {

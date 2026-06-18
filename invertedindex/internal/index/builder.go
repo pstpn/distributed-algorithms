@@ -52,11 +52,9 @@ func (b *IndexBuilder) AddDocument(title, text string) uint32 {
 
 		if pl, exists := b.postings[term]; exists {
 			pl.postings = append(pl.postings, posting)
-			pl.df++
 		} else {
 			b.postings[term] = &PostingList{
 				postings: []Posting{posting},
-				df:       1,
 			}
 		}
 	}
@@ -123,7 +121,7 @@ func (b *IndexBuilder) Save(filename string) error {
 		flat = append(flat, uint32(len(skipListFlat)))
 		flat = append(flat, skipListFlat...)
 
-		writer.AddTerm(term, pl.DF(), compression.Compress(flat))
+		writer.AddTerm(term, compression.Compress(flat))
 	}
 
 	if err := writer.Write(); err != nil {
