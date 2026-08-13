@@ -6,8 +6,24 @@ and measured on collections from 500 to 200 000 documents.
 ## What it does
 
 Queries support `AND`, `OR`, `NOT`, `ADJ` for adjacent terms and `NEAR/k` for terms within a
-distance, with results ranked by BM25. A parser turns the query into an AST and an evaluator
-walks it over the postings. There is a TUI for driving it by hand.
+distance, with parentheses for grouping and results ranked by BM25. A parser turns the query
+into an AST and an evaluator walks it over the postings.
+
+## The interface
+
+A terminal interface built on bubbletea drives all of it. The screens below are a real
+session over 405 473 Wikipedia articles, indexed from the raw dumps.
+
+| | |
+|---|---|
+| <img src="screenshots/menu.svg" width="470"> | <img src="screenshots/indexes.svg" width="470"> |
+| Build an index or open one that exists | Indexes on disk, the largest holding 471 MB of postings |
+| <img src="screenshots/results.svg" width="470"> | <img src="screenshots/document.svg" width="470"> |
+| `MACHINE ADJ LEARNING AND (NEURAL OR DEEP) AND NOT QUANTUM` returns 57 documents, BM25 scores drawn as bars | Opening a hit shows the article that earned it |
+
+The query in the third screen exercises every operator at once, and the document in the
+fourth shows why it matched: the article carries the phrase *machine learning* next to *deep
+neural network* and never mentions quantum anything.
 
 ## How it stores things
 

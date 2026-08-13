@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1036" height="262" viewBox="0 0 1036 262" font-family="Menlo,Consolas,monospace" font-size="13">
+<rect width="100%" height="100%" fill="#1e1e2e" rx="8"/>
+<text x="14.0" y="27.5" fill="#7dc3e3" font-weight="bold" xml:space="preserve">Inverted Index</text>
+<text x="14.0" y="81.5" fill="#8aadf3" font-weight="bold" xml:space="preserve">Выберите режим работы:</text>
+<rect x="14.0" y="104.0" width="260.4" height="18.0" fill="#8aadf3"/>
+<text x="22.4" y="117.5" fill="#1e1e2e" xml:space="preserve">▸ Построить индекс и загрузить</text>
+<text x="64.4" y="135.5" fill="#5b6078" xml:space="preserve">(источник: data/documents → индекс: data/indexes)</text>
+<text x="39.2" y="171.5" fill="#cad3f5" xml:space="preserve">Загрузить существующий индекс</text>
+<text x="64.4" y="189.5" fill="#5b6078" xml:space="preserve">(папка: data/indexes)</text>
+<text x="30.8" y="243.5" fill="#8aadf3" xml:space="preserve">↑/↓: навигация │ Enter: выбрать │ Ctrl+C: выход</text>
+</svg>

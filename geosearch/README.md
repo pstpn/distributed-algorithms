@@ -33,7 +33,20 @@ two orders of magnitude, while insertion collapses by a factor of ten. The tree 
 rebalanced, so every insertion walks a deeper and more lopsided path, and it is the write
 side, not the read side, that a balancing strategy would have to fix.
 
-## Profiles
+## Where the time goes
 
-Flame graphs of the search path at 100 000, 500 000 and 1 000 000 points are in
-[`profiles/`](profiles).
+Flame graphs of the search path, taken at three sizes. Width is time spent, and each level
+is a call one frame deeper.
+
+![Flame graph at 100 000 points](profiles/flamegraph_100000.svg)
+
+*100 000 points.*
+
+![Flame graph at 500 000 points](profiles/flamegraph_500000.svg)
+
+*500 000 points.*
+
+![Flame graph at 1 000 000 points](profiles/flamegraph_1000000.svg)
+
+*1 000 000 points. The stack grows deeper with the tree, which is the unbalanced insertion
+showing up on the read path as well.*

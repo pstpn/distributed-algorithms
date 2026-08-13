@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1036" height="226" viewBox="0 0 1036 226" font-family="Menlo,Consolas,monospace" font-size="13">
+<rect width="100%" height="100%" fill="#1e1e2e" rx="8"/>
+<text x="14.0" y="27.5" fill="#7dc3e3" font-weight="bold" xml:space="preserve">Загрузка индекса</text>
+<text x="30.8" y="81.5" fill="#8aadf3" font-weight="bold" xml:space="preserve">Доступные индексы (data/indexes):</text>
+<rect x="14.0" y="104.0" width="327.6" height="18.0" fill="#8aadf3"/>
+<text x="22.4" y="117.5" fill="#1e1e2e" xml:space="preserve">▸</text>
+<text x="47.6" y="117.5" fill="#1e1e2e" xml:space="preserve">index-20260618-182606.idx</text>
+<text x="274.4" y="117.5" fill="#5b6078" xml:space="preserve">471.6 MB</text>
+<text x="358.4" y="117.5" fill="#5b6078" xml:space="preserve">18.06.2026 18:26</text>
+<text x="47.6" y="135.5" fill="#cad3f5" xml:space="preserve">index-20260618-182457.idx</text>
+<text x="274.4" y="135.5" fill="#5b6078" xml:space="preserve">24.6 MB</text>
+<text x="350.0" y="135.5" fill="#5b6078" xml:space="preserve">18.06.2026 18:24</text>
+<text x="47.6" y="153.5" fill="#cad3f5" xml:space="preserve">index-20260618-182341.idx</text>
+<text x="274.4" y="153.5" fill="#5b6078" xml:space="preserve">569.9 MB</text>
+<text x="358.4" y="153.5" fill="#5b6078" xml:space="preserve">18.06.2026 18:24</text>
+<text x="30.8" y="207.5" fill="#8aadf3" xml:space="preserve">↑/↓: навигация │ Enter: загрузить │ Esc: назад │ Ctrl+C: выход</text>
+</svg>
